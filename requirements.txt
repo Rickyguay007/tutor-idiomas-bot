@@ -1,0 +1,5 @@
+python-telegram-bot[job-queue]>=21.6,<23
+openai>=1.40
+edge-tts>=6.1.12
+python-dotenv>=1.0
+tzdata>=2024.1
