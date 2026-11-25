@@ -70,6 +70,9 @@ docker compose up -d --build    # o reinicia python -m bot.main
 | `/stats` | Racha y progreso |
 | `/recordatorio 20:00` | Aviso diario (`off` para quitarlo) |
 | `/exportar` | CSV para Anki |
+| `/practicar`, `/describir`, `/usar` | Ejercicios de traducción, imagen y estructuras |
+| `/estructuras`, `/ver` | Ver tus estructuras y todo tu vocabulario |
+| Enlace de YouTube | Propone palabras y estructuras del video |
 | `/olvidar` | Reiniciar la conversación |
 
 ## Estructura

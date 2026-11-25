@@ -14,7 +14,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Poll, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import ContextTypes
 
-from . import ai, config, db, practice, speech, srs
+from . import ai, config, db, practice, speech, srs, youtube
 
 log = logging.getLogger(__name__)
 TZ = ZoneInfo(config.TIMEZONE)
@@ -38,6 +38,7 @@ Escríbeme o mándame una <b>nota de voz</b> en el idioma que estás estudiando 
 /agregar palabra – guardar una palabra (ej. <code>/agregar 坚持</code>)
 También puedes pedírmelo por voz: <i>"guárdame la palabra jiānchí"</i>
 /estructuras – ver tus estructuras gramaticales
+Mándame un <b>enlace de YouTube</b> y te propongo palabras y estructuras del video para guardar
 /ver – ver todas tus palabras y estructuras en una página con buscador
 /palabras – ver las últimas guardadas
 /buscar palabra – ver una palabra guardada
@@ -276,6 +277,10 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
 
 @restricted
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    vid = youtube.video_id(update.message.text)
+    if vid:
+        await youtube.handle_link(update, context, _user(update), vid)
+        return
     if context.user_data.get("ex"):
         await practice.answer(update, context, _user(update), update.message.text, today())
         return
@@ -593,7 +598,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user["id"]
     action, _, value = query.data.partition(":")
 
-    if action == "ex":
+    if action == "yt":
+        await youtube.on_button(update, context, user, value, today())
+
+    elif action == "ex":
         await query.edit_message_reply_markup(None)
         if value == "word":
             await practice.start_word(query.message.chat_id, user, context, today())

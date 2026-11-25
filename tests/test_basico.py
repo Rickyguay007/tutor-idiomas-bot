@@ -67,3 +67,11 @@ def test_instrucciones_se_arman():
     for lang, level in (("zh", "HSK4"), ("en", "B1")):
         texto = prompts.tutor_system(lang, level, "Ricardo", [{"original": "a", "corrected": "b"}])
         assert "save_structures" in texto and "save_words" in texto
+
+
+def test_enlaces_youtube():
+    from bot.youtube import video_id
+    assert video_id("mira https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10") == "dQw4w9WgXcQ"
+    assert video_id("https://youtu.be/dQw4w9WgXcQ?si=abc") == "dQw4w9WgXcQ"
+    assert video_id("https://youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert video_id("hola 你好") is None
