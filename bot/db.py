@@ -57,6 +57,23 @@ CREATE TABLE IF NOT EXISTS history (
     created_at  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS structures (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL,
+    language            TEXT NOT NULL,
+    pattern             TEXT NOT NULL,        -- ej. 虽然…但是…
+    explanation         TEXT DEFAULT '',
+    example             TEXT DEFAULT '',
+    example_reading     TEXT DEFAULT '',
+    example_translation TEXT DEFAULT '',
+    level               TEXT DEFAULT '',
+    source              TEXT DEFAULT '',
+    practiced           INTEGER DEFAULT 0,    -- veces que la usó en /usar
+    last_practiced      TEXT,
+    created_at          TEXT,
+    UNIQUE (user_id, language, pattern)
+);
+
 CREATE INDEX IF NOT EXISTS idx_words_due ON words (user_id, language, due);
 CREATE INDEX IF NOT EXISTS idx_history ON history (user_id, language, id);
 """
@@ -207,6 +224,73 @@ def all_words(uid: int, lang: str) -> list[dict]:
         (uid, lang),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------- estructuras gramaticales ----------
+
+STRUCT_FIELDS = ("pattern", "explanation", "example", "example_reading", "example_translation", "level")
+
+
+def _norm_pattern(p: str) -> str:
+    # "虽然...但是..." y "虽然……但是……" cuentan como la misma estructura.
+    return " ".join(p.replace("……", "…").replace("...", "…").split())
+
+
+def add_structure(uid: int, lang: str, source: str = "conversación", **data) -> bool:
+    """Guarda una estructura. Devuelve False si ya existía."""
+    pattern = _norm_pattern(str(data.get("pattern") or ""))
+    if not pattern:
+        return False
+    values = [str(data.get(f) or "").strip() for f in STRUCT_FIELDS]
+    values[0] = pattern
+    cur = _conn.execute(
+        f"""INSERT OR IGNORE INTO structures
+            (user_id, language, {', '.join(STRUCT_FIELDS)}, source, created_at)
+            VALUES (?, ?, {', '.join('?' * len(STRUCT_FIELDS))}, ?, ?)""",
+        (uid, lang, *values, source, _now()),
+    )
+    _conn.commit()
+    return cur.rowcount == 1
+
+
+def find_structure(uid: int, lang: str, pattern: str) -> dict | None:
+    row = _conn.execute(
+        "SELECT * FROM structures WHERE user_id = ? AND language = ? AND pattern = ?",
+        (uid, lang, _norm_pattern(pattern)),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_structures(uid: int, lang: str, limit: int = 1000) -> list[dict]:
+    rows = _conn.execute(
+        "SELECT * FROM structures WHERE user_id = ? AND language = ? ORDER BY id DESC LIMIT ?",
+        (uid, lang, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_structures(uid: int, lang: str) -> int:
+    return _conn.execute(
+        "SELECT COUNT(*) FROM structures WHERE user_id = ? AND language = ?", (uid, lang)
+    ).fetchone()[0]
+
+
+def structure_to_practice(uid: int, lang: str, exclude: int | None = None) -> dict | None:
+    """La estructura menos practicada (y hace más tiempo), para /usar."""
+    row = _conn.execute(
+        """SELECT * FROM structures WHERE user_id = ? AND language = ? AND id != ?
+           ORDER BY practiced, COALESCE(last_practiced, ''), RANDOM() LIMIT 1""",
+        (uid, lang, exclude or -1),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def mark_structure_practiced(sid: int) -> None:
+    _conn.execute(
+        "UPDATE structures SET practiced = practiced + 1, last_practiced = ? WHERE id = ?",
+        (_now(), sid),
+    )
+    _conn.commit()
 
 
 # ---------- errores ----------

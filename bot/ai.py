@@ -44,7 +44,9 @@ async def tutor_reply(
     data = await _ask_json(messages)
     data.setdefault("reply", "")
     data.setdefault("reply_language", lang)
-    for key in ("corrections", "new_words", "save_words"):
+    if not isinstance(data.get("grammar"), dict):
+        data["grammar"] = {}
+    for key in ("corrections", "new_words", "save_words", "save_structures"):
         if not isinstance(data.get(key), list):
             data[key] = []
     return data

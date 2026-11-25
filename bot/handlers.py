@@ -37,13 +37,15 @@ Escríbeme o mándame una <b>nota de voz</b> en el idioma que estás estudiando 
 <b>Vocabulario</b>
 /agregar palabra – guardar una palabra (ej. <code>/agregar 坚持</code>)
 También puedes pedírmelo por voz: <i>"guárdame la palabra jiānchí"</i>
-/ver – ver todas tus palabras en una página con buscador
+/estructuras – ver tus estructuras gramaticales
+/ver – ver todas tus palabras y estructuras en una página con buscador
 /palabras – ver las últimas guardadas
 /buscar palabra – ver una palabra guardada
 /exportar – descargar todo para Anki (CSV)
 
 <b>Práctica</b>
 /practicar – te digo una palabra en español, la traduces y haces una oración
+/usar – haz una oración con una de tus estructuras
 /describir – te muestro un dibujo y describes qué pasa
 /pista – ayuda durante el ejercicio · /terminar – salir del ejercicio
 /repasar – tarjetas con repaso espaciado
@@ -222,8 +224,21 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
                 line += f"\n  {e(c['explanation'])}"
             parts.append(line)
 
-    if data.get("grammar_note"):
-        parts.append(f"\n📌 {e(data['grammar_note'])}")
+    g = data["grammar"]
+    if g.get("pattern"):
+        is_new = db.add_structure(uid, lang, source="conversación", **g)
+        parts.append(f"\n📌 <b>{e(g['pattern'])}</b>" + ("  <i>(guardada)</i>" if is_new else ""))
+        if g.get("explanation"):
+            parts.append(e(g["explanation"]))
+        if g.get("example"):
+            parts.append(f"<i>{e(g['example'])}</i>" + (f"  ({e(g['example_reading'])})" if g.get("example_reading") else ""))
+
+    for st in data["save_structures"]:
+        if isinstance(st, dict) and st.get("pattern"):
+            if db.add_structure(uid, lang, source="pedido", **st):
+                parts.append(f"\n✅ Guardé la estructura <b>{e(st['pattern'])}</b>")
+            else:
+                parts.append(f"\n👍 Ya tenías guardada <b>{e(st['pattern'])}</b>")
 
     requested, already = [], []
     for w in data["save_words"]:
@@ -352,6 +367,32 @@ async def palabras(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @restricted
+async def estructuras(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = _user(update)
+    lang = user["language"]
+    items = db.list_structures(user["id"], lang, limit=15)
+    if not items:
+        await update.message.reply_text(
+            "Todavía no tienes estructuras guardadas. Se guardan solas cuando conversamos, "
+            "o pídemelo: «guárdame la estructura 虽然…但是…»."
+        )
+        return
+    total = db.count_structures(user["id"], lang)
+    lines = [f"<b>📌 {total} estructuras</b>", ""]
+    for st in items:
+        lines.append(f"<b>{e(st['pattern'])}</b>" + (f"  <code>{e(st['level'])}</code>" if st["level"] else ""))
+        if st["explanation"]:
+            lines.append(e(st["explanation"]))
+        if st["example"]:
+            lines.append(f"<i>{e(st['example'])}</i>")
+        lines.append("")
+    if total > len(items):
+        lines.append(f"…y {total - len(items)} más. Usa /ver para verlas todas.")
+    lines.append("Practícalas con /usar")
+    await update.message.reply_text("\n".join(lines)[:4000], parse_mode=ParseMode.HTML)
+
+
+@restricted
 async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = _user(update)
     word = " ".join(context.args).strip()
@@ -406,10 +447,14 @@ td.x{{color:#555;font-size:.9rem}} td.m{{color:#888;font-size:.8rem;white-space:
 <input id="q" placeholder="Buscar palabra, pinyin o significado…">
 <table><thead><tr><th>Palabra</th><th>Pronunciación</th><th>Significado</th><th class="x">Ejemplo</th><th>Nivel</th></tr></thead>
 <tbody id="t">{rows}</tbody></table>
+<h1 style="margin-top:28px">Estructuras gramaticales</h1>
+<p class="sub">{scount} estructuras</p>
+<table><thead><tr><th>Estructura</th><th>Para qué sirve</th><th>Ejemplo</th></tr></thead>
+<tbody id="s">{srows}</tbody></table>
 <script>
 document.getElementById('q').addEventListener('input',function(){{
   var q=this.value.toLowerCase();
-  document.querySelectorAll('#t tr').forEach(function(r){{r.style.display=r.textContent.toLowerCase().indexOf(q)>-1?'':'none'}});
+  document.querySelectorAll('#t tr, #s tr').forEach(function(r){{r.style.display=r.textContent.toLowerCase().indexOf(q)>-1?'':'none'}});
 }});
 </script></body></html>"""
 
@@ -420,9 +465,16 @@ async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = _user(update)
     lang = user["language"]
     words = list(reversed(db.all_words(user["id"], lang)))
-    if not words:
+    structs = db.list_structures(user["id"], lang)
+    if not words and not structs:
         await update.message.reply_text("Todavía no tienes palabras guardadas.")
         return
+    srows = "\n".join(
+        f"<tr><td class='w' style='font-size:1.1rem'>{e(st['pattern'])}<br><span class='m'>{e(st['level'])}</span></td>"
+        f"<td>{e(st['explanation'])}</td>"
+        f"<td>{e(st['example'])}<br><span class='r'>{e(st['example_reading'])}</span><br><i>{e(st['example_translation'])}</i></td></tr>"
+        for st in structs
+    )
     rows = "\n".join(
         f"<tr><td class='w'>{e(w['word'])}</td><td class='r'>{e(w['reading'])}</td>"
         f"<td>{e(w['meaning'])}</td>"
@@ -431,12 +483,13 @@ async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for w in words
     )
     html_page = PAGE.format(
-        title=e(LANG_LABEL[lang].split(" ", 1)[1]), count=len(words), date=today().isoformat(), rows=rows
+        title=e(LANG_LABEL[lang].split(" ", 1)[1]), count=len(words), date=today().isoformat(), rows=rows,
+        scount=len(structs), srows=srows,
     )
     data = io.BytesIO(html_page.encode("utf-8"))
     data.name = f"mis_palabras_{lang}.html"
     await update.message.reply_document(
-        data, caption=f"📖 Tus {len(words)} palabras. Ábrelo y se ve en el navegador, con buscador."
+        data, caption=f"📖 Tus {len(words)} palabras y {len(structs)} estructuras. Ábrelo y se ve en el navegador, con buscador."
     )
 
 
@@ -513,6 +566,11 @@ async def describir(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @restricted
+async def usar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await practice.start_structure(update.effective_chat.id, _user(update), context)
+
+
+@restricted
 async def pista(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await practice.hint(update, context)
 
@@ -539,6 +597,8 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(None)
         if value == "word":
             await practice.start_word(query.message.chat_id, user, context, today())
+        elif value == "struct":
+            await practice.start_structure(query.message.chat_id, user, context)
         elif value == "scene":
             await practice.start_scene(query.message.chat_id, user, context)
         else:
@@ -609,6 +669,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(
             f"<b>{label}</b> ({user[f'level_{lang}']})\n"
             f"  📚 {total} palabras · ⏰ {db.count_due(uid, lang, today())} por repasar · "
+            f"📌 {db.count_structures(uid, lang)} estructuras · "
             f"✏️ {db.count_mistakes(uid, lang)} correcciones"
         )
     if user["reminder"]:

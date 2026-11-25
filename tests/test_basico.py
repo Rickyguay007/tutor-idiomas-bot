@@ -47,3 +47,23 @@ def test_base_de_datos(tmp_path):
         db.add_history(1, "zh", "user", f"m{i}")
     hist = db.get_history(1, "zh", 4)
     assert [h["content"] for h in hist] == ["m8", "m9", "m10", "m11"]
+
+
+def test_estructuras(tmp_path):
+    db.init(str(tmp_path / "s.db"))
+    db.get_user(1)
+    assert db.add_structure(1, "zh", pattern="虽然...但是...", explanation="aunque… pero…", level="HSK4")
+    assert not db.add_structure(1, "zh", pattern="虽然……但是……")   # misma estructura
+    assert db.add_structure(1, "zh", pattern="把 + objeto + verbo")
+    assert db.count_structures(1, "zh") == 2
+    st = db.structure_to_practice(1, "zh")
+    db.mark_structure_practiced(st["id"])
+    otra = db.structure_to_practice(1, "zh")
+    assert otra["id"] != st["id"]                                # primero la menos practicada
+
+
+def test_instrucciones_se_arman():
+    from bot import prompts
+    for lang, level in (("zh", "HSK4"), ("en", "B1")):
+        texto = prompts.tutor_system(lang, level, "Ricardo", [{"original": "a", "corrected": "b"}])
+        assert "save_structures" in texto and "save_words" in texto

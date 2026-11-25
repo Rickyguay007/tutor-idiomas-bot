@@ -61,6 +61,22 @@ Devuelve SOLO un objeto JSON:
 }}"""
 
 
+def eval_structure_system(lang: str, level: str, st: dict) -> str:
+    return f"""Eres profesora de {LANG_NAMES[lang]} para un hispanohablante de nivel {level}.
+Le pediste hacer una oración propia usando la estructura «{st.get('pattern')}» ({st.get('explanation', '')}).
+Evalúa si la usó bien. La respuesta puede venir de una nota de voz transcrita: no castigues errores de transcripción obvios.
+Devuelve SOLO un objeto JSON:
+{{
+  "ok": true o false (¿usó la estructura de forma correcta y natural?),
+  "feedback": "comentario breve en español, 1 o 2 frases",
+  "corrected": "su oración corregida (vacío si ya estaba bien)",
+  "corrected_reading": "{_reading_rule(lang)} de corrected",
+  "example": "otra oración modelo con la estructura, distinta a la suya",
+  "example_reading": "{_reading_rule(lang)} de example",
+  "example_translation": "traducción al español de example"
+}}"""
+
+
 def scene_system(lang: str, level: str) -> str:
     return f"""Eres profesora de {LANG_NAMES[lang]} para hispanohablantes de nivel {level}.
 Inventa una escena cotidiana y concreta para que el estudiante la describa (personas haciendo algo: en un mercado, cocinando, en el parque, en una oficina, viajando, etc.). Varía mucho las escenas.
@@ -94,7 +110,7 @@ En las correcciones usa {_reading_rule(lang)} en los campos *_reading."""
 # ---------- utilidades ----------
 
 def _buttons(kind: str) -> InlineKeyboardMarkup:
-    label = "➡️ Otra palabra" if kind == "word" else "🖼️ Otra imagen"
+    label = {"word": "➡️ Otra palabra", "struct": "➡️ Otra estructura"}.get(kind, "🖼️ Otra imagen")
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(label, callback_data=f"ex:{kind}"),
         InlineKeyboardButton("⏹ Terminar", callback_data="ex:stop"),
@@ -148,6 +164,27 @@ async def start_word(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYP
     )
 
 
+async def start_structure(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = user["language"]
+    last = context.user_data.get("last_struct")
+    st = db.structure_to_practice(user["id"], lang, exclude=last)
+    if not st:
+        await context.bot.send_message(
+            chat_id,
+            "Todavía no tienes estructuras guardadas. Conversa conmigo y se irán guardando, "
+            "o pídeme «guárdame la estructura 虽然…但是…».",
+        )
+        return
+    context.user_data["ex"] = {"kind": "struct", "struct": st, "lang": lang}
+    context.user_data["last_struct"] = st["id"]
+    await context.bot.send_message(
+        chat_id,
+        f"📌 Haz una oración tuya con:\n\n<b>{_e(st['pattern'])}</b>\n{_e(st['explanation'])}\n\n"
+        "Puedes escribir o mandar nota de voz.\n<i>/pista para ver un ejemplo · /terminar para salir</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 async def start_scene(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYPE) -> None:
     lang = user["language"]
     level = db.level_of(user)
@@ -186,6 +223,13 @@ async def hint(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not ex:
         await update.message.reply_text("No hay ningún ejercicio abierto. Prueba /practicar o /describir.")
         return
+    if ex["kind"] == "struct":
+        st = ex["struct"]
+        text = f"💡 Ejemplo: {st['example']}" if st.get("example") else "💡 No tengo un ejemplo guardado para esta."
+        if st.get("example_reading"):
+            text += f"\n{st['example_reading']}"
+        await update.message.reply_text(text)
+        return
     if ex["kind"] == "word":
         w = ex["word"]
         word = str(w.get("word", "")).strip()
@@ -213,6 +257,10 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict,
             f"Palabra pedida: «{w.get('meaning')}» (respuesta esperada: {w.get('word')} {w.get('reading', '')}).\n"
             f"Respuesta del estudiante: {text}"
         )
+    elif ex["kind"] == "struct":
+        st = ex["struct"]
+        system = eval_structure_system(lang, level, st)
+        prompt = f"Oración del estudiante: {text}"
     else:
         system = eval_scene_system(lang, level, ex["scene"])
         prompt = f"Descripción del estudiante: {text}"
@@ -247,6 +295,18 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict,
         elif not ok:
             db.add_word(user["id"], lang, today, source="práctica", **{k: w.get(k, "") for k in ("word", "reading", "meaning", "level")})
             parts.append("\n🆕 La guardé en tus palabras para repasarla.")
+    elif ex["kind"] == "struct":
+        parts.append(f"{'✅' if data.get('ok') else '🟡'} {_e(data.get('feedback'))}")
+        parts.append(f"\n📌 <b>{_e(st['pattern'])}</b>")
+        if data.get("corrected"):
+            parts.append(f"\n✏️ <b>{_e(data['corrected'])}</b>\n<i>{_e(data.get('corrected_reading'))}</i>")
+            db.add_mistake(user["id"], lang, text, data["corrected"], data.get("feedback", ""))
+        if data.get("example"):
+            parts.append(
+                f"\n📝 {_e(data['example'])}\n<i>{_e(data.get('example_reading'))}</i>\n"
+                f"🇪🇸 {_e(data.get('example_translation'))}"
+            )
+        db.mark_structure_practiced(st["id"])
     else:
         parts.append(f"💬 {_e(data.get('feedback'))}")
         corrections = [c for c in data.get("corrections") or [] if isinstance(c, dict) and c.get("corrected")]
@@ -275,7 +335,7 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict,
     context.user_data.pop("ex", None)
 
     # Respuesta modelo en audio, para escuchar la pronunciación.
-    spoken = data.get("example") if ex["kind"] == "word" else data.get("model")
+    spoken = data.get("model") if ex["kind"] == "scene" else data.get("example")
     if user["voice"] and spoken:
         from .handlers import send_voice
         try:

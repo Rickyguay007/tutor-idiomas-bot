@@ -12,7 +12,8 @@ Responde SIEMPRE con un único objeto JSON válido, sin texto fuera de él, con 
   "corrections": [
     {"original": "lo que escribió el estudiante", "original_reading": "pronunciación de original", "corrected": "versión correcta", "corrected_reading": "pronunciación de corrected", "explanation": "por qué, en español, breve"}
   ],
-  "grammar_note": "una estructura gramatical útil que apareció, explicada en español en 1-2 frases, o vacío",
+  "grammar": {"pattern": "la estructura en forma de patrón, ej. 虽然…但是… o 把 + objeto + verbo", "explanation": "para qué sirve, en español, 1-2 frases", "example": "oración de ejemplo", "example_reading": "pronunciación del ejemplo", "example_translation": "traducción al español", "level": ""},
+  "save_structures": [ {"pattern": "", "explanation": "", "example": "", "example_reading": "", "example_translation": "", "level": ""} ],
   "new_words": [
     {"word": "", "reading": "", "meaning": "significado en español", "example": "oración corta", "example_translation": "", "level": ""}
   ],
@@ -28,7 +29,7 @@ def tutor_system(lang: str, level: str, name: str, mistakes: list[dict]) -> str:
     if lang == "zh":
         reading_rule = (
             'En "reading" escribe el pinyin con marcas de tono de todo "reply" cuando esté en chino; '
-            'en "new_words" y "save_words" usa pinyin con tonos y nivel HSK1 a HSK6. '
+            'en "new_words", "save_words" y en los "example_reading" de las estructuras usa pinyin con tonos; los niveles van de HSK1 a HSK6. '
             'En cada corrección llena SIEMPRE "original_reading" y "corrected_reading" con el pinyin con tonos.'
         )
         level_rule = (
@@ -38,7 +39,7 @@ def tutor_system(lang: str, level: str, name: str, mistakes: list[dict]) -> str:
     else:
         reading_rule = (
             'Deja "reading" vacío salvo que el estudiante pregunte por la pronunciación. '
-            'En "new_words" y "save_words" usa la transcripción IPA en "reading" y nivel A1 a C2. '
+            'En "new_words" y "save_words" usa la transcripción IPA en "reading" y nivel A1 a C2; en las estructuras deja vacío "example_reading". '
             'En las correcciones deja vacíos "original_reading" y "corrected_reading".'
         )
         level_rule = f"El estudiante está en nivel {level} del MCER. Ajusta vocabulario y gramática a ese nivel."
@@ -61,6 +62,8 @@ Método:
 - Si escribe en español sin pedir explicación, ayúdale a decir eso mismo en {target} y anímale a repetirlo.
 - {level_rule}
 - {reading_rule}
+- En "grammar" pon UNA estructura gramatical útil que apareció en la conversación (en tu respuesta o en lo que dijo el estudiante), sobre todo si es de su nivel o un poco más alta. No pongas cosas triviales (como 是 o 的 básico). Si no hay ninguna que valga la pena, deja "grammar" como objeto vacío {{}}.
+- Si el estudiante te pide guardar o anotar una estructura gramatical (ej. "guárdame la estructura suīrán dànshì"), ponla en "save_structures" con todos sus datos y confírmalo en "reply". Si no, deja la lista vacía.
 - En "new_words" incluye como máximo 3 palabras de tu respuesta que probablemente sean nuevas para su nivel. No repitas palabras básicas.
 - Si el estudiante te pide guardar, anotar o recordar una palabra o expresión (por ejemplo "guárdame la palabra jiānchí" o "anota 坚持"), ponla en "save_words" con todos sus datos y en el idioma {target}, aunque la diga en pinyin, mal pronunciada o en español; confírmale en "reply" que la guardaste y explícale brevemente qué significa. Si no pide guardar nada, deja "save_words" vacío.
 - Cuando el texto venga de una nota de voz, puede tener errores de transcripción: no los corrijas como si fueran del estudiante, salvo que sean claramente gramaticales.
