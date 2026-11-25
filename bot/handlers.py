@@ -36,6 +36,8 @@ Escríbeme o mándame una <b>nota de voz</b> en el idioma que estás estudiando 
 
 <b>Vocabulario</b>
 /agregar palabra – guardar una palabra (ej. <code>/agregar 坚持</code>)
+También puedes pedírmelo por voz: <i>"guárdame la palabra jiānchí"</i>
+/ver – ver todas tus palabras en una página con buscador
 /palabras – ver las últimas guardadas
 /buscar palabra – ver una palabra guardada
 /exportar – descargar todo para Anki (CSV)
@@ -207,10 +209,32 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
         parts.append("\n✏️ <b>Correcciones</b>")
         for c in corrections:
             db.add_mistake(uid, lang, c.get("original", ""), c["corrected"], c.get("explanation", ""))
-            parts.append(f"• <s>{e(c.get('original'))}</s> → <b>{e(c['corrected'])}</b>\n  {e(c.get('explanation'))}")
+            line = f"• <s>{e(c.get('original'))}</s>"
+            if c.get("original_reading"):
+                line += f" <i>({e(c['original_reading'])})</i>"
+            line += f"\n  → <b>{e(c['corrected'])}</b>"
+            if c.get("corrected_reading"):
+                line += f" <i>({e(c['corrected_reading'])})</i>"
+            if c.get("explanation"):
+                line += f"\n  {e(c['explanation'])}"
+            parts.append(line)
 
     if data.get("grammar_note"):
         parts.append(f"\n📌 {e(data['grammar_note'])}")
+
+    requested, already = [], []
+    for w in data["save_words"]:
+        if not isinstance(w, dict) or not str(w.get("word", "")).strip():
+            continue
+        if db.add_word(uid, lang, today(), source="pedido", **w):
+            requested.append(w)
+        else:
+            already.append(w)
+    if requested:
+        parts.append("\n✅ <b>Guardé lo que me pediste</b>")
+        parts.extend(f"• {e(w['word'])} <i>{e(w.get('reading'))}</i> – {e(w.get('meaning'))}" for w in requested)
+    if already:
+        parts.append("\n👍 Ya tenías guardada: " + ", ".join(e(w["word"]) for w in already))
 
     saved = []
     for w in data["new_words"]:
@@ -314,7 +338,7 @@ async def palabras(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [f"<b>{LANG_LABEL[lang]} · {total} palabras</b>" + (f" (filtro {e(level)})" if level else ""), ""]
     lines += [f"• <b>{e(w['word'])}</b> <i>{e(w['reading'])}</i> – {e(w['meaning'])}" for w in words]
     if total > len(words):
-        lines.append(f"\n…y {total - len(words)} más. Usa /exportar para verlas todas.")
+        lines.append(f"\n…y {total - len(words)} más. Usa /ver para verlas todas.")
     await update.message.reply_text("\n".join(lines)[:4000], parse_mode=ParseMode.HTML)
 
 
@@ -350,6 +374,60 @@ async def exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_document(
         data,
         caption=f"{len(words)} palabras. En Anki: Archivo → Importar, separado por comas, permitir HTML.",
+    )
+
+
+PAGE = """<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mis palabras · {title}</title>
+<style>
+body{{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#faf8f5;color:#222}}
+h1{{font-size:1.3rem;margin:0 0 4px}} p.sub{{color:#666;margin:0 0 12px}}
+input{{width:100%;box-sizing:border-box;padding:10px;font-size:1rem;border:1px solid #ccc;border-radius:8px;margin-bottom:12px}}
+table{{width:100%;border-collapse:collapse;background:#fff}}
+th,td{{text-align:left;padding:8px;border-bottom:1px solid #eee;vertical-align:top}}
+th{{background:#f0ece6;position:sticky;top:0;cursor:pointer}}
+td.w{{font-size:1.4rem;white-space:nowrap}} td.r{{color:#a33;font-style:italic}}
+td.x{{color:#555;font-size:.9rem}} td.m{{color:#888;font-size:.8rem;white-space:nowrap}}
+@media (max-width:600px){{td.x,th.x{{display:none}}}}
+</style></head><body>
+<h1>Mis palabras · {title}</h1>
+<p class="sub">{count} palabras · actualizado {date}</p>
+<input id="q" placeholder="Buscar palabra, pinyin o significado…">
+<table><thead><tr><th>Palabra</th><th>Pronunciación</th><th>Significado</th><th class="x">Ejemplo</th><th>Nivel</th></tr></thead>
+<tbody id="t">{rows}</tbody></table>
+<script>
+document.getElementById('q').addEventListener('input',function(){{
+  var q=this.value.toLowerCase();
+  document.querySelectorAll('#t tr').forEach(function(r){{r.style.display=r.textContent.toLowerCase().indexOf(q)>-1?'':'none'}});
+}});
+</script></body></html>"""
+
+
+@restricted
+async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Envía una página con todas las palabras, que se abre en el navegador."""
+    user = _user(update)
+    lang = user["language"]
+    words = list(reversed(db.all_words(user["id"], lang)))
+    if not words:
+        await update.message.reply_text("Todavía no tienes palabras guardadas.")
+        return
+    rows = "\n".join(
+        f"<tr><td class='w'>{e(w['word'])}</td><td class='r'>{e(w['reading'])}</td>"
+        f"<td>{e(w['meaning'])}</td>"
+        f"<td class='x'>{e(w['example'])}<br><i>{e(w['example_translation'])}</i></td>"
+        f"<td class='m'>{e(w['level'])}<br>{e(w['source'])}<br>{e((w['created_at'] or '')[:10])}</td></tr>"
+        for w in words
+    )
+    html_page = PAGE.format(
+        title=e(LANG_LABEL[lang].split(" ", 1)[1]), count=len(words), date=today().isoformat(), rows=rows
+    )
+    data = io.BytesIO(html_page.encode("utf-8"))
+    data.name = f"mis_palabras_{lang}.html"
+    await update.message.reply_document(
+        data, caption=f"📖 Tus {len(words)} palabras. Ábrelo y se ve en el navegador, con buscador."
     )
 
 
