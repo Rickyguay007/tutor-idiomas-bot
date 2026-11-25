@@ -56,3 +56,9 @@ async def lookup_word(lang: str, level: str, word: str) -> dict:
         {"role": "user", "content": word},
     ]
     return await _ask_json(messages, temperature=0.3)
+
+
+async def ask_json(system: str, user: str, temperature: float = 0.7) -> dict:
+    """Pregunta simple (instrucción + mensaje) que devuelve JSON. La usan los ejercicios."""
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    return await _ask_json(messages, temperature=temperature)

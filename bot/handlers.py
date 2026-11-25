@@ -14,7 +14,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Poll, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import ContextTypes
 
-from . import ai, config, db, speech, srs
+from . import ai, config, db, practice, speech, srs
 
 log = logging.getLogger(__name__)
 TZ = ZoneInfo(config.TIMEZONE)
@@ -43,6 +43,9 @@ También puedes pedírmelo por voz: <i>"guárdame la palabra jiānchí"</i>
 /exportar – descargar todo para Anki (CSV)
 
 <b>Práctica</b>
+/practicar – te digo una palabra en español, la traduces y haces una oración
+/describir – te muestro un dibujo y describes qué pasa
+/pista – ayuda durante el ejercicio · /terminar – salir del ejercicio
 /repasar – tarjetas con repaso espaciado
 /quiz – pregunta rápida con tus palabras
 /decir frase – escuchar cómo se pronuncia
@@ -258,6 +261,9 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
 
 @restricted
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("ex"):
+        await practice.answer(update, context, _user(update), update.message.text, today())
+        return
     await _converse(update, context, update.message.text)
 
 
@@ -285,6 +291,9 @@ async def on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No escuché nada en el audio 🤔")
         return
     await update.message.reply_text(f"🎙️ <i>{e(text)}</i>", parse_mode=ParseMode.HTML)
+    if context.user_data.get("ex"):
+        await practice.answer(update, context, _user(update), text, today())
+        return
     await _converse(update, context, text, from_voice=True)
 
 
@@ -491,6 +500,31 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.touch_study(user["id"], today())
 
 
+# ---------- ejercicios ----------
+
+@restricted
+async def practicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await practice.start_word(update.effective_chat.id, _user(update), context, today())
+
+
+@restricted
+async def describir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await practice.start_scene(update.effective_chat.id, _user(update), context)
+
+
+@restricted
+async def pista(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await practice.hint(update, context)
+
+
+@restricted
+async def terminar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    had = context.user_data.pop("ex", None)
+    await update.message.reply_text(
+        "Listo, cerré el ejercicio. Ya podemos conversar normal 🙂" if had else "No había ningún ejercicio abierto."
+    )
+
+
 # ---------- botones ----------
 
 @restricted
@@ -501,7 +535,17 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user["id"]
     action, _, value = query.data.partition(":")
 
-    if action == "lang":
+    if action == "ex":
+        await query.edit_message_reply_markup(None)
+        if value == "word":
+            await practice.start_word(query.message.chat_id, user, context, today())
+        elif value == "scene":
+            await practice.start_scene(query.message.chat_id, user, context)
+        else:
+            context.user_data.pop("ex", None)
+            await context.bot.send_message(query.message.chat_id, "👍 Buen trabajo. Seguimos conversando cuando quieras.")
+
+    elif action == "lang":
         db.update_user(uid, language=value)
         user = db.get_user(uid)
         await query.edit_message_text(
