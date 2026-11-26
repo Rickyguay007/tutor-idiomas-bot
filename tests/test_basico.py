@@ -75,3 +75,10 @@ def test_enlaces_youtube():
     assert video_id("https://youtu.be/dQw4w9WgXcQ?si=abc") == "dQw4w9WgXcQ"
     assert video_id("https://youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
     assert video_id("hola 你好") is None
+
+
+def test_minuto_del_enlace():
+    from bot.youtube import start_seconds
+    assert start_seconds("https://youtu.be/dQw4w9WgXcQ?t=754") == 754
+    assert start_seconds("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=12m34s") == 754
+    assert start_seconds("https://youtu.be/dQw4w9WgXcQ") == 0

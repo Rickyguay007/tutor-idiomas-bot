@@ -21,7 +21,7 @@ SUB_LANGS = {
     "zh": ["zh-Hans", "zh-CN", "zh", "zh-SG", "zh-Hant", "zh-TW", "zh-HK"],
     "en": ["en", "en-US", "en-GB"],
 }
-MAX_CHARS = 3500     # cuánto texto del video se le pasa a la IA
+MAX_CHARS = 3000     # tamaño de cada parte del video que se le pasa a la IA
 MAX_ITEMS = 12
 
 
@@ -35,9 +35,40 @@ def _e(text) -> str:
     return html.escape(str(text or ""))
 
 
-def _fetch_subtitles(vid: str, lang: str) -> str:
+def _fetch_parts(vid: str, lang: str) -> list[dict]:
+    """Descarga los subtítulos y los corta en partes de unos MAX_CHARS caracteres,
+    guardando el minuto en que empieza y termina cada parte."""
     fetched = YouTubeTranscriptApi().fetch(vid, languages=SUB_LANGS[lang])
-    return " ".join(s.text.replace("\n", " ") for s in fetched).strip()
+    parts, buf, size, begin, last = [], [], 0, None, 0.0
+    for snip in fetched:
+        line = snip.text.replace("\n", " ").strip()
+        if not line:
+            continue
+        if begin is None:
+            begin = snip.start
+        buf.append(line)
+        size += len(line) + 1
+        last = snip.start + getattr(snip, "duration", 0)
+        if size >= MAX_CHARS:
+            parts.append({"text": " ".join(buf), "start": begin, "end": last})
+            buf, size, begin = [], 0, None
+    if buf:
+        parts.append({"text": " ".join(buf), "start": begin, "end": last})
+    return parts
+
+
+def start_seconds(text: str) -> int:
+    """Lee el minuto del enlace (…&t=754 o ?t=12m34s), si lo tiene."""
+    m = re.search(r"[?&]t=(?:(\d+)h)?(?:(\d+)m)?(\d+)?s?", text or "")
+    if not m or not any(m.groups()):
+        return 0
+    h, mi, se = (int(x) if x else 0 for x in m.groups())
+    return h * 3600 + mi * 60 + se
+
+
+def _mmss(sec: float) -> str:
+    sec = int(sec)
+    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
 
 
 def extract_system(lang: str, level: str, known: list[str]) -> str:
@@ -59,7 +90,8 @@ Devuelve SOLO un objeto JSON:
 }}"""
 
 
-def _keyboard(items: list[dict]) -> InlineKeyboardMarkup:
+def _keyboard(pending: dict) -> InlineKeyboardMarkup:
+    items = pending["items"]
     rows, row = [], []
     for i, it in enumerate(items):
         label = it["word"] if it["kind"] == "word" else "📌 " + it["pattern"]
@@ -72,18 +104,21 @@ def _keyboard(items: list[dict]) -> InlineKeyboardMarkup:
         rows.append(row)
     if any(not it.get("saved") for it in items):
         rows.append([InlineKeyboardButton("✅ Guardar todo", callback_data="yt:all")])
+    if pending["index"] + 1 < pending["total"]:
+        rows.append([InlineKeyboardButton(
+            f"➡️ Parte {pending['index'] + 2} de {pending['total']}",
+            callback_data=f"ytn:{pending['vid']}:{pending['index'] + 1}")])
     return InlineKeyboardMarkup(rows)
 
 
-async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict, vid: str) -> None:
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict, vid: str, link: str = "") -> None:
     lang = user["language"]
-    level = db.level_of(user)
     msg = update.effective_message
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
     target = "chino" if lang == "zh" else "inglés"
 
     try:
-        text = await asyncio.to_thread(_fetch_subtitles, vid, lang)
+        parts = await asyncio.to_thread(_fetch_parts, vid, lang)
     except Exception as exc:
         log.warning("Sin subtítulos para %s: %s", vid, type(exc).__name__)
         await msg.reply_text(
@@ -91,18 +126,44 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, user: 
             "Solo funciona con videos que tengan subtítulos (aunque sean automáticos) en ese idioma."
         )
         return
-    if not text:
+    if not parts:
         await msg.reply_text("El video no tiene texto en los subtítulos 🤔")
         return
 
-    await msg.reply_text("📺 Leyendo los subtítulos… dame unos segundos.")
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    known = [w["word"] for w in db.all_words(user["id"], lang) if w["word"] in text]
+    # Si el enlace trae un minuto (?t=…), empieza desde la parte que lo contiene.
+    t = start_seconds(link)
+    index = next((i for i, p in enumerate(parts) if p["end"] > t), 0) if t else 0
+    context.user_data.setdefault("ytvideo", {})[vid] = {"parts": parts, "lang": lang, "suggested": []}
+    if len(parts) > 1:
+        await msg.reply_text(
+            f"📺 Es un video largo: lo dividí en {len(parts)} partes. Empiezo por la {index + 1} "
+            f"(desde {_mmss(parts[index]['start'])})."
+        )
+    else:
+        await msg.reply_text("📺 Leyendo los subtítulos… dame unos segundos.")
+    await analyze_part(update.effective_chat.id, context, user, vid, index)
+
+
+async def analyze_part(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user: dict, vid: str, index: int) -> None:
+    video = context.user_data.get("ytvideo", {}).get(vid)
+    if not video or index >= len(video["parts"]):
+        await context.bot.send_message(chat_id, "Ese video ya no está en memoria. Mándame el enlace otra vez.")
+        return
+    lang, parts = video["lang"], video["parts"]
+    part = parts[index]
+    text = part["text"]
+    await context.bot.send_chat_action(chat_id, ChatAction.TYPING)
+
+    # No repetir lo que ya sabe ni lo que ya le propuse en otras partes del mismo video.
+    known = [w["word"] for w in db.all_words(user["id"], lang) if w["word"] in text] + video["suggested"]
     try:
-        data = await ai.ask_json(extract_system(lang, level, known), text[:MAX_CHARS], temperature=0.3)
+        data = await ai.ask_json(extract_system(lang, db.level_of(user), known), text, temperature=0.3)
     except Exception:
         log.exception("Error analizando el video")
-        await msg.reply_text("😕 No pude conectar con la IA. Intenta de nuevo.")
+        await context.bot.send_message(
+            chat_id, "😕 No pude conectar con la IA (quizá llegaste al límite por minuto). Espera un momento y prueba otra vez.",
+            reply_markup=_next_button(vid, index, parts, retry=True),
+        )
         return
 
     items = []
@@ -112,25 +173,48 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, user: 
     for st in data.get("structures") or []:
         if isinstance(st, dict) and str(st.get("pattern", "")).strip() and not db.find_structure(user["id"], lang, st["pattern"]):
             items.append({**st, "kind": "struct"})
-    items = items[:MAX_ITEMS]
+    items = [it for it in items if (it.get("word") or it.get("pattern")) not in video["suggested"]][:MAX_ITEMS]
+    video["suggested"] += [it.get("word") or it.get("pattern") for it in items]
+
+    header = f"📺 <b>Parte {index + 1} de {len(parts)}</b> · {_mmss(part['start'])}–{_mmss(part['end'])}\n" if len(parts) > 1 else ""
     if not items:
-        await msg.reply_text("Revisé el video y no encontré nada nuevo para ti. ¡Ya conoces todo lo importante! 💪")
+        await context.bot.send_message(
+            chat_id, header + "En esta parte no encontré nada nuevo para ti 💪",
+            parse_mode=ParseMode.HTML, reply_markup=_next_button(vid, index, parts),
+        )
         return
 
-    lines = []
+    lines = [header] if header else []
     if data.get("summary"):
-        lines.append(f"📺 <i>{_e(data['summary'])}</i>\n")
+        lines.append(f"<i>{_e(data['summary'])}</i>\n")
     for it in items:
         if it["kind"] == "word":
             lines.append(f"• <b>{_e(it['word'])}</b> <i>{_e(it.get('reading'))}</i> – {_e(it.get('meaning'))}")
         else:
             lines.append(f"• 📌 <b>{_e(it['pattern'])}</b> – {_e(it.get('explanation'))}")
-    if len(text) > MAX_CHARS:
-        lines.append("\n<i>(Revisé el comienzo del video; es largo.)</i>")
     lines.append("\nToca las que quieras guardar:")
 
-    sent = await msg.reply_text("\n".join(lines)[:4000], parse_mode=ParseMode.HTML, reply_markup=_keyboard(items))
-    context.user_data.setdefault("yt", {})[sent.message_id] = {"items": items, "lang": lang, "vid": vid}
+    pending = {"items": items, "lang": lang, "vid": vid, "index": index, "total": len(parts)}
+    sent = await context.bot.send_message(
+        chat_id, "\n".join(lines)[:4000], parse_mode=ParseMode.HTML, reply_markup=_keyboard(pending)
+    )
+    context.user_data.setdefault("yt", {})[sent.message_id] = pending
+
+
+def _next_button(vid: str, index: int, parts: list, retry: bool = False) -> InlineKeyboardMarkup | None:
+    if retry:
+        return InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Reintentar", callback_data=f"ytn:{vid}:{index}")]])
+    if index + 1 < len(parts):
+        return InlineKeyboardMarkup([[InlineKeyboardButton(
+            f"➡️ Parte {index + 2} de {len(parts)}", callback_data=f"ytn:{vid}:{index + 1}")]])
+    return None
+
+
+async def on_next(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict, value: str) -> None:
+    query = update.callback_query
+    vid, _, idx = value.rpartition(":")
+    await query.edit_message_reply_markup(None)
+    await analyze_part(query.message.chat_id, context, user, vid, int(idx))
 
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict, value: str, today) -> None:
@@ -139,6 +223,8 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE, user: di
     if not pending:
         await query.edit_message_reply_markup(None)
         await context.bot.send_message(query.message.chat_id, "Esa lista ya expiró. Mándame el enlace otra vez.")
+        return
+    if value == "next":
         return
     items, lang = pending["items"], pending["lang"]
     targets = range(len(items)) if value == "all" else [int(value)]
@@ -154,4 +240,4 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE, user: di
             db.add_structure(user["id"], lang, source="YouTube", **fields)
         it["saved"] = True
     db.touch_study(user["id"], today)
-    await query.edit_message_reply_markup(_keyboard(items))
+    await query.edit_message_reply_markup(_keyboard(pending))

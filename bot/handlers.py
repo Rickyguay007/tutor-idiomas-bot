@@ -279,7 +279,7 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     vid = youtube.video_id(update.message.text)
     if vid:
-        await youtube.handle_link(update, context, _user(update), vid)
+        await youtube.handle_link(update, context, _user(update), vid, update.message.text)
         return
     if context.user_data.get("ex"):
         await practice.answer(update, context, _user(update), update.message.text, today())
@@ -598,7 +598,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user["id"]
     action, _, value = query.data.partition(":")
 
-    if action == "yt":
+    if action == "ytn":
+        await youtube.on_next(update, context, user, value)
+
+    elif action == "yt":
         await youtube.on_button(update, context, user, value, today())
 
     elif action == "ex":
