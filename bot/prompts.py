@@ -12,13 +12,13 @@ Responde SIEMPRE con un único objeto JSON válido, sin texto fuera de él, con 
   "corrections": [
     {"original": "lo que escribió el estudiante", "original_reading": "pronunciación de original", "corrected": "versión correcta", "corrected_reading": "pronunciación de corrected", "explanation": "por qué, en español, breve"}
   ],
-  "grammar": {"pattern": "la estructura en forma de patrón, ej. 虽然…但是… o 把 + objeto + verbo", "explanation": "para qué sirve, en español, 1-2 frases", "example": "oración de ejemplo", "example_reading": "pronunciación del ejemplo", "example_translation": "traducción al español", "level": ""},
+  "grammar": {"pattern": "la estructura en forma de patrón, ej. 虽然…但是… o 把 + objeto + verbo", "explanation": "para qué sirve, en español, 1-2 frases", "example": "oración de ejemplo más larga y completa (unos 15 a 25 caracteres o palabras, con contexto: cuándo, dónde, por qué); puede tener palabras de un nivel más alto que el del estudiante", "example_reading": "pronunciación del ejemplo", "example_translation": "traducción al español", "level": ""},
   "save_structures": [ {"pattern": "", "explanation": "", "example": "", "example_reading": "", "example_translation": "", "level": ""} ],
   "new_words": [
-    {"word": "", "reading": "", "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión", "meaning": "significado en español", "example": "oración corta", "example_reading": "pronunciación de example", "example_translation": "", "level": ""}
+    {"word": "", "reading": "", "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión", "meaning": "significado en español", "example": "oración de ejemplo más larga y completa (unos 15 a 25 caracteres o palabras, con contexto: cuándo, dónde, por qué); puede tener palabras de un nivel más alto que el del estudiante", "example_reading": "pronunciación de example", "example_translation": "", "level": ""}
   ],
   "save_words": [
-    {"word": "", "reading": "", "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión", "meaning": "significado en español", "example": "oración corta", "example_reading": "pronunciación de example", "example_translation": "", "level": ""}
+    {"word": "", "reading": "", "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión", "meaning": "significado en español", "example": "oración de ejemplo más larga y completa (unos 15 a 25 caracteres o palabras, con contexto: cuándo, dónde, por qué); puede tener palabras de un nivel más alto que el del estudiante", "example_reading": "pronunciación de example", "example_translation": "", "level": ""}
   ]
 }
 """
@@ -83,7 +83,7 @@ Te darán una palabra o expresión (puede venir en {target} o en español). Devu
   "reading": "{reading}",
   "meaning": "significado en español, breve; si tiene varios, los 2 más comunes",
   "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión",
-  "example": "una oración de ejemplo natural en {target}, del nivel del estudiante",
+  "example": "una oración de ejemplo natural en {target}, más larga y completa (unos 15 a 25 caracteres o palabras, con contexto: cuándo, dónde, por qué); puede tener palabras de un nivel más alto que el del estudiante",
   "example_reading": "{reading} de la oración de ejemplo",
   "example_translation": "traducción de la oración al español",
   "level": "nivel aproximado ({levels})",

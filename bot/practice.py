@@ -55,7 +55,7 @@ Devuelve SOLO un objeto JSON:
   "feedback": "comentario breve en español, 1 o 2 frases",
   "corrected": "su oración corregida (vacío si ya estaba bien o si no hizo oración)",
   "corrected_reading": "{_reading_rule(lang)} de corrected",
-  "example": "otra oración modelo natural con la palabra, de su nivel",
+  "example": "otra oración modelo natural con la palabra, larga y con contexto (15 a 25 caracteres o palabras); puede tener palabras de un nivel más alto",
   "example_reading": "{_reading_rule(lang)} de example",
   "example_translation": "traducción al español de example"
 }}"""
@@ -71,7 +71,7 @@ Devuelve SOLO un objeto JSON:
   "feedback": "comentario breve en español, 1 o 2 frases",
   "corrected": "su oración corregida (vacío si ya estaba bien)",
   "corrected_reading": "{_reading_rule(lang)} de corrected",
-  "example": "otra oración modelo con la estructura, distinta a la suya",
+  "example": "otra oración modelo con la estructura, distinta a la suya, larga y con contexto (15 a 25 caracteres o palabras); puede tener palabras de un nivel más alto",
   "example_reading": "{_reading_rule(lang)} de example",
   "example_translation": "traducción al español de example"
 }}"""
