@@ -132,16 +132,17 @@ async def _fetch_image(prompt: str) -> bytes | None:
 
 # ---------- iniciar ejercicios ----------
 
-async def start_word(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYPE, today) -> None:
+async def start_word(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYPE, today, pool: list | None = None) -> None:
     lang = user["language"]
     level = db.level_of(user)
     await context.bot.send_chat_action(chat_id, ChatAction.TYPING)
 
     # Primero las palabras que ya guardó (así repasa lo suyo); si tiene pocas, la IA propone una.
-    saved = [w for w in db.list_words(user["id"], lang, limit=300) if w["meaning"]]
+    # Si viene de una canción, solo palabras de esa canción.
+    saved = pool if pool is not None else [w for w in db.list_words(user["id"], lang, limit=300) if w["meaning"]]
     last = context.user_data.get("last_word")
-    choices = [w for w in saved if w["word"] != last]
-    if len(choices) >= 5 and random.random() < 0.8:
+    choices = [w for w in saved if w["word"] != last] or saved
+    if pool is not None or (len(choices) >= 5 and random.random() < 0.8):
         word = random.choice(choices)
     else:
         try:
@@ -164,10 +165,14 @@ async def start_word(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYP
     )
 
 
-async def start_structure(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_structure(chat_id: int, user: dict, context: ContextTypes.DEFAULT_TYPE, pool: list | None = None) -> None:
     lang = user["language"]
     last = context.user_data.get("last_struct")
-    st = db.structure_to_practice(user["id"], lang, exclude=last)
+    if pool:
+        choices = [p for p in pool if p["id"] != last] or pool
+        st = min(choices, key=lambda p: (p["practiced"], p["last_practiced"] or ""))
+    else:
+        st = db.structure_to_practice(user["id"], lang, exclude=last)
     if not st:
         await context.bot.send_message(
             chat_id,

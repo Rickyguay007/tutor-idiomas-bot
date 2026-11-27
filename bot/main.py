@@ -19,6 +19,7 @@ COMMANDS = [
     ("ver", "Ver todas tus palabras (página)", handlers.ver),
     ("palabras", "Ver tus últimas palabras", handlers.palabras),
     ("estructuras", "Ver tus estructuras gramaticales", handlers.estructuras),
+    ("canciones", "Tu catálogo de canciones", handlers.canciones),
     ("buscar", "Ver una palabra guardada", handlers.buscar),
     ("practicar", "Traducir una palabra y hacer una oración", handlers.practicar),
     ("usar", "Practicar una estructura gramatical", handlers.usar),

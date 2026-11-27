@@ -14,7 +14,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Poll, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import ContextTypes
 
-from . import ai, config, db, practice, speech, srs, youtube
+from . import ai, config, db, practice, songs, speech, srs, youtube
 
 log = logging.getLogger(__name__)
 TZ = ZoneInfo(config.TIMEZONE)
@@ -39,6 +39,7 @@ Escríbeme o mándame una <b>nota de voz</b> en el idioma que estás estudiando 
 También puedes pedírmelo por voz: <i>"guárdame la palabra jiānchí"</i>
 /estructuras – ver tus estructuras gramaticales
 Mándame un <b>enlace de YouTube</b> y te propongo palabras y estructuras del video para guardar
+/canciones – tu catálogo de canciones para estudiarlas una por una
 /ver – ver todas tus palabras y estructuras en una página con buscador
 /palabras – ver las últimas guardadas
 /buscar palabra – ver una palabra guardada
@@ -515,6 +516,20 @@ async def decir(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------- repaso espaciado ----------
 
 async def _send_next_card(chat_id: int, uid: int, lang: str, context) -> None:
+    song = context.user_data.get("review_song")
+    if song:
+        word = songs.pick_review_word(uid, song)
+        if not word:
+            context.user_data.pop("review_song", None)
+            await context.bot.send_message(chat_id, f"🎉 Repasaste todas las palabras de «{song['title']}». ¡Bien hecho!")
+            return
+        left = len(db.song_words(uid, song["vid"])) - len(song["seen"]) + 1
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👀 Mostrar respuesta", callback_data=f"show:{word['id']}")]])
+        await context.bot.send_message(
+            chat_id, f"<code>🎵 {e(song['title'][:40])} · quedan {left}</code>\n\n<b>{e(word['word'])}</b>",
+            parse_mode=ParseMode.HTML, reply_markup=keyboard,
+        )
+        return
     word = db.next_due(uid, lang, today())
     if not word:
         await context.bot.send_message(chat_id, "🎉 No tienes más repasos por hoy. ¡Buen trabajo!")
@@ -531,23 +546,24 @@ async def _send_next_card(chat_id: int, uid: int, lang: str, context) -> None:
 
 @restricted
 async def repasar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("review_song", None)
     user = _user(update)
     await _send_next_card(update.effective_chat.id, user["id"], user["language"], context)
 
 
-@restricted
-async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = _user(update)
+async def send_quiz(chat_id: int, context, user: dict, targets: list | None = None) -> None:
+    """Pregunta de opción múltiple. Con targets, la palabra sale de ahí (ej. una canción)."""
     words = [w for w in db.list_words(user["id"], user["language"], limit=300) if w["meaning"]]
     meanings = {w["meaning"] for w in words}
     if len(meanings) < 4:
-        await update.message.reply_text("Necesitas al menos 4 palabras guardadas con significado para el quiz.")
+        await context.bot.send_message(chat_id, "Necesitas al menos 4 palabras guardadas con significado para el quiz.")
         return
-    target = random.choice(words)
+    target = random.choice(targets or words)
     others = random.sample([m for m in meanings if m != target["meaning"]], 3)
     options = [target["meaning"], *others]
     random.shuffle(options)
-    await update.message.reply_poll(
+    await context.bot.send_poll(
+        chat_id,
         question=f"¿Qué significa {target['word']}?"[:300],
         options=[o[:100] for o in options],
         type=Poll.QUIZ,
@@ -556,6 +572,16 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_anonymous=False,
     )
     db.touch_study(user["id"], today())
+
+
+@restricted
+async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_quiz(update.effective_chat.id, context, _user(update))
+
+
+@restricted
+async def canciones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await songs.catalog(update.effective_chat.id, _user(update), context)
 
 
 # ---------- ejercicios ----------
@@ -598,7 +624,17 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user["id"]
     action, _, value = query.data.partition(":")
 
-    if action == "ytn":
+    if action in ("sg", "sgl"):
+        await songs.on_button(
+            update, context, user, action, value, today(),
+            send_quiz=send_quiz, start_word=practice.start_word, start_structure=practice.start_structure,
+            send_next_card=_send_next_card, analyze_video=youtube.analyze_song,
+        )
+
+    elif action == "yts":
+        await youtube.on_save_song(update, context, user, value)
+
+    elif action == "ytn":
         await youtube.on_next(update, context, user, value)
 
     elif action == "yt":

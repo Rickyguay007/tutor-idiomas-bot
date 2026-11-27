@@ -4,6 +4,8 @@ import asyncio
 import logging
 import re
 
+import httpx
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import ContextTypes
@@ -57,6 +59,21 @@ def _fetch_parts(vid: str, lang: str) -> list[dict]:
     return parts
 
 
+async def video_title(vid: str) -> str:
+    """Nombre del video, para el catálogo de canciones (vacío si no se pudo leer)."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://www.youtube.com/oembed",
+                params={"url": f"https://www.youtube.com/watch?v={vid}", "format": "json"},
+            )
+        if r.status_code == 200:
+            return str(r.json().get("title", "")).strip()
+    except Exception:
+        log.warning("No pude leer el título de %s", vid)
+    return ""
+
+
 def start_seconds(text: str) -> int:
     """Lee el minuto del enlace (…&t=754 o ?t=12m34s), si lo tiene."""
     m = re.search(r"[?&]t=(?:(\d+)h)?(?:(\d+)m)?(\d+)?s?", text or "")
@@ -104,6 +121,10 @@ def _keyboard(pending: dict) -> InlineKeyboardMarkup:
         rows.append(row)
     if any(not it.get("saved") for it in items):
         rows.append([InlineKeyboardButton("✅ Guardar todo", callback_data="yt:all")])
+    if db.get_song_by_video(pending["uid"], pending["vid"]):
+        rows.append([InlineKeyboardButton("🎵 Está en tus canciones", callback_data=f"yts:{pending['vid']}")])
+    else:
+        rows.append([InlineKeyboardButton("🎵 Guardar como canción", callback_data=f"yts:{pending['vid']}")])
     if pending["index"] + 1 < pending["total"]:
         rows.append([InlineKeyboardButton(
             f"➡️ Parte {pending['index'] + 2} de {pending['total']}",
@@ -133,7 +154,8 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE, user: 
     # Si el enlace trae un minuto (?t=…), empieza desde la parte que lo contiene.
     t = start_seconds(link)
     index = next((i for i, p in enumerate(parts) if p["end"] > t), 0) if t else 0
-    context.user_data.setdefault("ytvideo", {})[vid] = {"parts": parts, "lang": lang, "suggested": []}
+    title = await video_title(vid)
+    context.user_data.setdefault("ytvideo", {})[vid] = {"parts": parts, "lang": lang, "suggested": [], "title": title}
     if len(parts) > 1:
         await msg.reply_text(
             f"📺 Es un video largo: lo dividí en {len(parts)} partes. Empiezo por la {index + 1} "
@@ -194,7 +216,7 @@ async def analyze_part(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user: d
             lines.append(f"• 📌 <b>{_e(it['pattern'])}</b> – {_e(it.get('explanation'))}")
     lines.append("\nToca las que quieras guardar:")
 
-    pending = {"items": items, "lang": lang, "vid": vid, "index": index, "total": len(parts)}
+    pending = {"items": items, "lang": lang, "vid": vid, "index": index, "total": len(parts), "uid": user["id"]}
     sent = await context.bot.send_message(
         chat_id, "\n".join(lines)[:4000], parse_mode=ParseMode.HTML, reply_markup=_keyboard(pending)
     )
@@ -234,10 +256,46 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE, user: di
             continue
         if it["kind"] == "word":
             fields = {k: it.get(k, "") for k in ("word", "reading", "meaning", "example", "example_translation", "level")}
-            db.add_word(user["id"], lang, today, source="YouTube", **fields)
+            db.add_word(user["id"], lang, today, source="YouTube", video_id=pending["vid"], **fields)
         else:
             fields = {k: it.get(k, "") for k in ("pattern", "explanation", "example", "example_reading", "example_translation", "level")}
-            db.add_structure(user["id"], lang, source="YouTube", **fields)
+            db.add_structure(user["id"], lang, source="YouTube", video_id=pending["vid"], **fields)
         it["saved"] = True
     db.touch_study(user["id"], today)
     await query.edit_message_reply_markup(_keyboard(pending))
+
+
+async def on_save_song(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict, vid: str) -> None:
+    """Agrega el video al catálogo de canciones."""
+    query = update.callback_query
+    if db.get_song_by_video(user["id"], vid):
+        await context.bot.send_message(query.message.chat_id, "🎵 Esa canción ya está en tu catálogo. Mírala con /canciones.")
+        return
+    video = context.user_data.get("ytvideo", {}).get(vid, {})
+    title = video.get("title") or await video_title(vid)
+    db.add_song(user["id"], video.get("lang") or user["language"], vid, title)
+    pending = context.user_data.get("yt", {}).get(query.message.message_id)
+    if pending:
+        await query.edit_message_reply_markup(_keyboard(pending))
+    await context.bot.send_message(
+        query.message.chat_id,
+        f"🎵 Guardé «{title or 'la canción'}» en tu catálogo. Las palabras que guardes de este video quedan "
+        "en la canción. Para estudiarla: /canciones",
+    )
+
+
+async def analyze_song(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user: dict, vid: str) -> None:
+    """Vuelve a revisar una canción del catálogo para buscar más palabras."""
+    lang = user["language"]
+    video = context.user_data.get("ytvideo", {}).get(vid)
+    if not video:
+        try:
+            parts = await asyncio.to_thread(_fetch_parts, vid, lang)
+        except Exception:
+            await context.bot.send_message(chat_id, "😕 No pude leer los subtítulos de esa canción ahora.")
+            return
+        song = db.get_song_by_video(user["id"], vid)
+        context.user_data.setdefault("ytvideo", {})[vid] = {
+            "parts": parts, "lang": lang, "suggested": [], "title": song["title"] if song else "",
+        }
+    await analyze_part(chat_id, context, user, vid, 0)

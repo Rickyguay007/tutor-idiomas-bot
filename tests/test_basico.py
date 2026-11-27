@@ -82,3 +82,22 @@ def test_minuto_del_enlace():
     assert start_seconds("https://youtu.be/dQw4w9WgXcQ?t=754") == 754
     assert start_seconds("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=12m34s") == 754
     assert start_seconds("https://youtu.be/dQw4w9WgXcQ") == 0
+
+
+def test_canciones(tmp_path):
+    import sqlite3
+    viejo = tmp_path / "viejo.db"                      # base de una versión anterior, sin video_id
+    c = sqlite3.connect(viejo)
+    c.executescript("CREATE TABLE words (id INTEGER PRIMARY KEY, user_id INT, language TEXT, word TEXT, reading TEXT DEFAULT '', meaning TEXT DEFAULT '', example TEXT DEFAULT '', example_translation TEXT DEFAULT '', level TEXT DEFAULT '', source TEXT DEFAULT '', created_at TEXT, ease REAL DEFAULT 2.5, interval INTEGER DEFAULT 0, reps INTEGER DEFAULT 0, due TEXT, UNIQUE(user_id, language, word));"
+                    "INSERT INTO words (user_id, language, word, due) VALUES (1, 'zh', '月亮', '2026-11-18');")
+    c.commit(); c.close()
+    db.init(str(viejo))
+    db.get_user(1)
+    assert db.count_words(1, "zh") == 1                # no se pierde nada
+    sid = db.add_song(1, "zh", "abcdefghijk", "月亮代表我的心")
+    db.add_word(1, "zh", HOY, video_id="abcdefghijk", word="代表", meaning="representar")
+    db.add_word(1, "zh", HOY, video_id="abcdefghijk", word="月亮")   # ya existía: se vincula
+    assert {w["word"] for w in db.song_words(1, "abcdefghijk")} == {"代表", "月亮"}
+    assert db.list_songs(1, "zh")[0]["n_words"] == 2
+    db.delete_song(sid, 1)
+    assert db.list_songs(1, "zh") == [] and db.count_words(1, "zh") == 2

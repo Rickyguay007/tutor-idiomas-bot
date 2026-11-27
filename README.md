@@ -73,6 +73,7 @@ docker compose up -d --build    # o reinicia python -m bot.main
 | `/practicar`, `/describir`, `/usar` | Ejercicios de traducción, imagen y estructuras |
 | `/estructuras`, `/ver` | Ver tus estructuras y todo tu vocabulario |
 | Enlace de YouTube | Propone palabras y estructuras del video |
+| `/canciones` | Catálogo de canciones: repasar, quiz y ejercicios por canción |
 | `/olvidar` | Reiniciar la conversación |
 
 ## Estructura

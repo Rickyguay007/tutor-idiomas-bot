@@ -74,6 +74,16 @@ CREATE TABLE IF NOT EXISTS structures (
     UNIQUE (user_id, language, pattern)
 );
 
+CREATE TABLE IF NOT EXISTS songs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    language    TEXT NOT NULL,
+    video_id    TEXT NOT NULL,
+    title       TEXT DEFAULT '',
+    created_at  TEXT,
+    UNIQUE (user_id, video_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_words_due ON words (user_id, language, due);
 CREATE INDEX IF NOT EXISTS idx_history ON history (user_id, language, id);
 """
@@ -94,6 +104,11 @@ def init(path: str) -> None:
     _conn = sqlite3.connect(path, check_same_thread=False)
     _conn.row_factory = sqlite3.Row
     _conn.executescript(SCHEMA)
+    # Bases creadas con versiones anteriores: agrega las columnas nuevas sin perder nada.
+    for table in ("words", "structures"):
+        cols = {r["name"] for r in _conn.execute(f"PRAGMA table_info({table})")}
+        if "video_id" not in cols:
+            _conn.execute(f"ALTER TABLE {table} ADD COLUMN video_id TEXT DEFAULT ''")
     _conn.commit()
 
 
@@ -145,8 +160,8 @@ def users_with_reminder() -> list[dict]:
 
 # ---------- palabras ----------
 
-def add_word(uid: int, lang: str, today: date, source: str = "manual", **data) -> bool:
-    """Guarda una palabra. Devuelve False si ya existía."""
+def add_word(uid: int, lang: str, today: date, source: str = "manual", video_id: str = "", **data) -> bool:
+    """Guarda una palabra. Devuelve False si ya existía (si viene de un video, la vincula igual)."""
     word = (data.get("word") or "").strip()
     if not word:
         return False
@@ -154,10 +169,15 @@ def add_word(uid: int, lang: str, today: date, source: str = "manual", **data) -
     values[0] = word
     cur = _conn.execute(
         f"""INSERT OR IGNORE INTO words
-            (user_id, language, {', '.join(WORD_FIELDS)}, source, created_at, due)
-            VALUES (?, ?, {', '.join('?' * len(WORD_FIELDS))}, ?, ?, ?)""",
-        (uid, lang, *values, source, _now(), today.isoformat()),
+            (user_id, language, {', '.join(WORD_FIELDS)}, source, created_at, due, video_id)
+            VALUES (?, ?, {', '.join('?' * len(WORD_FIELDS))}, ?, ?, ?, ?)""",
+        (uid, lang, *values, source, _now(), today.isoformat(), video_id),
     )
+    if cur.rowcount == 0 and video_id:
+        _conn.execute(
+            "UPDATE words SET video_id = ? WHERE user_id = ? AND language = ? AND word = ? AND video_id = ''",
+            (video_id, uid, lang, word),
+        )
     _conn.commit()
     return cur.rowcount == 1
 
@@ -236,7 +256,7 @@ def _norm_pattern(p: str) -> str:
     return " ".join(p.replace("……", "…").replace("...", "…").split())
 
 
-def add_structure(uid: int, lang: str, source: str = "conversación", **data) -> bool:
+def add_structure(uid: int, lang: str, source: str = "conversación", video_id: str = "", **data) -> bool:
     """Guarda una estructura. Devuelve False si ya existía."""
     pattern = _norm_pattern(str(data.get("pattern") or ""))
     if not pattern:
@@ -245,9 +265,9 @@ def add_structure(uid: int, lang: str, source: str = "conversación", **data) ->
     values[0] = pattern
     cur = _conn.execute(
         f"""INSERT OR IGNORE INTO structures
-            (user_id, language, {', '.join(STRUCT_FIELDS)}, source, created_at)
-            VALUES (?, ?, {', '.join('?' * len(STRUCT_FIELDS))}, ?, ?)""",
-        (uid, lang, *values, source, _now()),
+            (user_id, language, {', '.join(STRUCT_FIELDS)}, source, created_at, video_id)
+            VALUES (?, ?, {', '.join('?' * len(STRUCT_FIELDS))}, ?, ?, ?)""",
+        (uid, lang, *values, source, _now(), video_id),
     )
     _conn.commit()
     return cur.rowcount == 1
@@ -291,6 +311,57 @@ def mark_structure_practiced(sid: int) -> None:
         (_now(), sid),
     )
     _conn.commit()
+
+
+# ---------- canciones ----------
+
+def add_song(uid: int, lang: str, video_id: str, title: str) -> int:
+    _conn.execute(
+        "INSERT OR IGNORE INTO songs (user_id, language, video_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+        (uid, lang, video_id, title.strip() or "Canción sin nombre", _now()),
+    )
+    _conn.commit()
+    return get_song_by_video(uid, video_id)["id"]
+
+
+def get_song(song_id: int, uid: int) -> dict | None:
+    row = _conn.execute("SELECT * FROM songs WHERE id = ? AND user_id = ?", (song_id, uid)).fetchone()
+    return dict(row) if row else None
+
+
+def get_song_by_video(uid: int, video_id: str) -> dict | None:
+    row = _conn.execute("SELECT * FROM songs WHERE user_id = ? AND video_id = ?", (uid, video_id)).fetchone()
+    return dict(row) if row else None
+
+
+def list_songs(uid: int, lang: str) -> list[dict]:
+    rows = _conn.execute(
+        """SELECT s.*, (SELECT COUNT(*) FROM words w WHERE w.user_id = s.user_id AND w.video_id = s.video_id) AS n_words,
+                  (SELECT COUNT(*) FROM structures t WHERE t.user_id = s.user_id AND t.video_id = s.video_id) AS n_structs
+           FROM songs s WHERE s.user_id = ? AND s.language = ? ORDER BY s.title COLLATE NOCASE""",
+        (uid, lang),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_song(song_id: int, uid: int) -> None:
+    """Quita la canción del catálogo; sus palabras siguen guardadas."""
+    _conn.execute("DELETE FROM songs WHERE id = ? AND user_id = ?", (song_id, uid))
+    _conn.commit()
+
+
+def song_words(uid: int, video_id: str) -> list[dict]:
+    rows = _conn.execute(
+        "SELECT * FROM words WHERE user_id = ? AND video_id = ? ORDER BY due, id", (uid, video_id)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def song_structures(uid: int, video_id: str) -> list[dict]:
+    rows = _conn.execute(
+        "SELECT * FROM structures WHERE user_id = ? AND video_id = ? ORDER BY id", (uid, video_id)
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---------- errores ----------
