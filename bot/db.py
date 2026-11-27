@@ -106,10 +106,11 @@ def init(path: str) -> None:
     _conn.executescript(SCHEMA)
     # Bases creadas con versiones anteriores: agrega las columnas nuevas sin perder nada.
     for table, column in (("words", "video_id"), ("structures", "video_id"),
-                          ("words", "pos"), ("words", "example_reading")):
+                          ("words", "pos"), ("words", "example_reading"), ("words", "mastered")):
         cols = {r["name"] for r in _conn.execute(f"PRAGMA table_info({table})")}
         if column not in cols:
-            _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT DEFAULT ''")
+            kind = "INTEGER DEFAULT 0" if column == "mastered" else "TEXT DEFAULT ''"
+            _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
     _conn.commit()
 
 
@@ -183,6 +184,23 @@ def add_word(uid: int, lang: str, today: date, source: str = "manual", video_id:
     return cur.rowcount == 1
 
 
+def set_mastered(word_id: int, uid: int, mastered: bool) -> None:
+    """«Ya me la sé»: sale de repasos, quiz y ejercicios, pero sigue guardada."""
+    _conn.execute("UPDATE words SET mastered = ? WHERE id = ? AND user_id = ?", (int(mastered), word_id, uid))
+    _conn.commit()
+
+
+def delete_word(word_id: int, uid: int) -> None:
+    _conn.execute("DELETE FROM words WHERE id = ? AND user_id = ?", (word_id, uid))
+    _conn.commit()
+
+
+def count_mastered(uid: int, lang: str) -> int:
+    return _conn.execute(
+        "SELECT COUNT(*) FROM words WHERE user_id = ? AND language = ? AND mastered = 1", (uid, lang)
+    ).fetchone()[0]
+
+
 def fill_word(word_id: int, pos: str, example_reading: str) -> None:
     """Completa tipo de palabra y pinyin del ejemplo en palabras guardadas antes de que existieran."""
     _conn.execute(
@@ -209,7 +227,7 @@ def find_word(uid: int, lang: str, word: str) -> dict | None:
 
 
 def list_words(uid: int, lang: str, limit: int = 20, level: str | None = None) -> list[dict]:
-    sql = "SELECT * FROM words WHERE user_id = ? AND language = ?"
+    sql = "SELECT * FROM words WHERE user_id = ? AND language = ? AND mastered = 0"
     params: list = [uid, lang]
     if level:
         sql += " AND level = ?"
@@ -227,7 +245,7 @@ def count_words(uid: int, lang: str) -> int:
 
 def next_due(uid: int, lang: str, today: date) -> dict | None:
     row = _conn.execute(
-        """SELECT * FROM words WHERE user_id = ? AND language = ? AND due <= ?
+        """SELECT * FROM words WHERE user_id = ? AND language = ? AND due <= ? AND mastered = 0
            ORDER BY due, reps, id LIMIT 1""",
         (uid, lang, today.isoformat()),
     ).fetchone()
@@ -236,7 +254,7 @@ def next_due(uid: int, lang: str, today: date) -> dict | None:
 
 def count_due(uid: int, lang: str, today: date) -> int:
     return _conn.execute(
-        "SELECT COUNT(*) FROM words WHERE user_id = ? AND language = ? AND due <= ?",
+        "SELECT COUNT(*) FROM words WHERE user_id = ? AND language = ? AND due <= ? AND mastered = 0",
         (uid, lang, today.isoformat()),
     ).fetchone()[0]
 
@@ -363,7 +381,7 @@ def delete_song(song_id: int, uid: int) -> None:
 
 def song_words(uid: int, video_id: str) -> list[dict]:
     rows = _conn.execute(
-        "SELECT * FROM words WHERE user_id = ? AND video_id = ? ORDER BY due, id", (uid, video_id)
+        "SELECT * FROM words WHERE user_id = ? AND video_id = ? AND mastered = 0 ORDER BY due, id", (uid, video_id)
     ).fetchall()
     return [dict(r) for r in rows]
 

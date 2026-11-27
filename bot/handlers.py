@@ -104,6 +104,17 @@ def pos_label(pos: str, lang: str) -> str:
     return f"{zh} · {pos}" if zh else pos
 
 
+def manage_row(w: dict, review: bool = False) -> list:
+    """Botones para sacar una palabra del estudio o borrarla. En un repaso, después sigue la próxima tarjeta."""
+    r = ":r" if review else ""
+    if w.get("mastered"):
+        return [InlineKeyboardButton("↩️ Volver a estudiarla", callback_data=f"wm:{w['id']}:0")]
+    return [
+        InlineKeyboardButton("✅ Ya me la sé", callback_data=f"wm:{w['id']}:1{r}"),
+        InlineKeyboardButton("🗑 Borrar", callback_data=f"wd:{w['id']}:ask{r}"),
+    ]
+
+
 def word_card(w: dict, with_srs: bool = False) -> str:
     lines = [f"<b>{e(w.get('word'))}</b>"]
     if w.get("reading"):
@@ -123,7 +134,9 @@ def word_card(w: dict, with_srs: bool = False) -> str:
     extra = []
     if w.get("level"):
         extra.append(w["level"])
-    if with_srs and w.get("due"):
+    if w.get("mastered"):
+        extra.append("✅ ya te la sabes")
+    elif with_srs and w.get("due"):
         extra.append(f"próximo repaso {w['due']}")
     if extra:
         lines.append(f"\n<i>{e(' · '.join(extra))}</i>")
@@ -446,7 +459,10 @@ async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not found:
         await update.message.reply_text("No la encontré entre tus palabras. Puedes guardarla con /agregar.")
         return
-    await update.message.reply_text(word_card(found, with_srs=True), parse_mode=ParseMode.HTML)
+    await update.message.reply_text(
+        word_card(found, with_srs=True), parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([manage_row(found)]),
+    )
 
 
 @restricted
@@ -525,7 +541,7 @@ async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<tr><td class='w'>{e(w['word'])}</td><td class='r'>{e(w['reading'])}</td>"
         f"<td>{e(w['meaning'])}<br><span class='m'>{e(w['pos'])}</span></td>"
         f"<td class='x'>{e(w['example'])}<br><span class='r'>{e(w['example_reading'])}</span><br><i>{e(w['example_translation'])}</i></td>"
-        f"<td class='m'>{e(w['level'])}<br>{e(w['source'])}<br>{e((w['created_at'] or '')[:10])}</td></tr>"
+        f"<td class='m'>{'✅ sabida<br>' if w.get('mastered') else ''}{e(w['level'])}<br>{e(w['source'])}<br>{e((w['created_at'] or '')[:10])}</td></tr>"
         for w in words
     )
     html_page = PAGE.format(
@@ -664,7 +680,53 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user["id"]
     action, _, value = query.data.partition(":")
 
-    if action in ("sg", "sgl"):
+    if action == "wm":
+        word_id, flag, *rest = value.split(":")
+        in_review = bool(rest)
+        word = db.get_word(int(word_id), uid)
+        if not word:
+            await query.edit_message_reply_markup(None)
+            return
+        db.set_mastered(word["id"], uid, flag == "1")
+        word = db.get_word(word["id"], uid)
+        if flag == "1":
+            await query.edit_message_text(
+                word_card(word) + "\n\n✅ Listo, ya no te la pregunto. Sigue guardada en tu vocabulario.",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([manage_row(word)]),
+            )
+            if in_review:
+                await _send_next_card(query.message.chat_id, uid, word["language"], context)
+        else:
+            await query.edit_message_text(
+                word_card(word) + "\n\n↩️ Volvió a tus repasos.",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([manage_row(word)]),
+            )
+
+    elif action == "wd":
+        word_id, step, *rest = value.split(":")
+        r = ":r" if rest else ""
+        word = db.get_word(int(word_id), uid)
+        if not word:
+            await query.edit_message_reply_markup(None)
+            return
+        if step == "ask":
+            await query.edit_message_reply_markup(InlineKeyboardMarkup([[
+                InlineKeyboardButton("Sí, borrarla", callback_data=f"wd:{word['id']}:yes{r}"),
+                InlineKeyboardButton("No", callback_data=f"wd:{word['id']}:no{r}"),
+            ]]))
+        elif step == "yes":
+            db.delete_word(word["id"], uid)
+            await query.edit_message_text(f"🗑 Borré {word['word']} de tus palabras.")
+            if r:
+                await _send_next_card(query.message.chat_id, uid, word["language"], context)
+        elif r:
+            buttons = [[InlineKeyboardButton(label, callback_data=f"grade:{word['id']}:{g}") for g, label in srs.GRADES.items()],
+                       manage_row(word, review=True)]
+            await query.edit_message_reply_markup(InlineKeyboardMarkup(buttons))
+        else:
+            await query.edit_message_reply_markup(InlineKeyboardMarkup([manage_row(word)]))
+
+    elif action in ("sg", "sgl"):
         await songs.on_button(
             update, context, user, action, value, today(),
             send_quiz=send_quiz, start_word=practice.start_word, start_structure=practice.start_structure,
@@ -710,7 +772,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         word = await complete_word(db.get_word(int(value), uid))
         if not word:
             return
-        buttons = [[InlineKeyboardButton(label, callback_data=f"grade:{word['id']}:{g}") for g, label in srs.GRADES.items()]]
+        buttons = [
+            [InlineKeyboardButton(label, callback_data=f"grade:{word['id']}:{g}") for g, label in srs.GRADES.items()],
+            manage_row(word, review=True),
+        ]
         await query.edit_message_text(
             word_card(word), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons)
         )
@@ -755,7 +820,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
         lines.append(
             f"<b>{label}</b> ({user[f'level_{lang}']})\n"
-            f"  📚 {total} palabras · ⏰ {db.count_due(uid, lang, today())} por repasar · "
+            f"  📚 {total} palabras ({db.count_mastered(uid, lang)} ya te las sabes) · ⏰ {db.count_due(uid, lang, today())} por repasar · "
             f"📌 {db.count_structures(uid, lang)} estructuras · "
             f"✏️ {db.count_mistakes(uid, lang)} correcciones"
         )

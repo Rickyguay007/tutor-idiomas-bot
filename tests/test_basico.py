@@ -113,3 +113,18 @@ def test_tipo_y_pinyin_del_ejemplo(tmp_path):
     db.add_word(1, "zh", HOY, word="书")
     db.fill_word(db.find_word(1, "zh", "书")["id"], "sustantivo", "")
     assert db.find_word(1, "zh", "书")["pos"] == "sustantivo"
+
+
+def test_ya_me_la_se_y_borrar(tmp_path):
+    db.init(str(tmp_path / "m.db"))
+    db.get_user(1)
+    db.add_word(1, "zh", HOY, word="你好", meaning="hola")
+    db.add_word(1, "zh", HOY, word="坚持", meaning="persistir")
+    w = db.find_word(1, "zh", "你好")
+    db.set_mastered(w["id"], 1, True)
+    assert db.count_due(1, "zh", HOY) == 1                       # ya no sale en el repaso
+    assert [x["word"] for x in db.list_words(1, "zh")] == ["坚持"]  # ni en quiz/ejercicios
+    assert db.count_words(1, "zh") == 2 and db.count_mastered(1, "zh") == 1
+    assert not db.add_word(1, "zh", HOY, word="你好")              # no se vuelve a proponer como nueva
+    db.delete_word(db.find_word(1, "zh", "坚持")["id"], 1)
+    assert db.count_words(1, "zh") == 1
