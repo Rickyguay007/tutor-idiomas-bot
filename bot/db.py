@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_history ON history (user_id, language, id);
 """
 
 USER_FIELDS = {"name", "language", "level_zh", "level_en", "voice", "reminder"}
-WORD_FIELDS = ("word", "reading", "meaning", "example", "example_translation", "level")
+WORD_FIELDS = ("word", "reading", "meaning", "example", "example_translation", "level", "pos", "example_reading")
 
 
 def _now() -> str:
@@ -105,10 +105,11 @@ def init(path: str) -> None:
     _conn.row_factory = sqlite3.Row
     _conn.executescript(SCHEMA)
     # Bases creadas con versiones anteriores: agrega las columnas nuevas sin perder nada.
-    for table in ("words", "structures"):
+    for table, column in (("words", "video_id"), ("structures", "video_id"),
+                          ("words", "pos"), ("words", "example_reading")):
         cols = {r["name"] for r in _conn.execute(f"PRAGMA table_info({table})")}
-        if "video_id" not in cols:
-            _conn.execute(f"ALTER TABLE {table} ADD COLUMN video_id TEXT DEFAULT ''")
+        if column not in cols:
+            _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT DEFAULT ''")
     _conn.commit()
 
 
@@ -180,6 +181,16 @@ def add_word(uid: int, lang: str, today: date, source: str = "manual", video_id:
         )
     _conn.commit()
     return cur.rowcount == 1
+
+
+def fill_word(word_id: int, pos: str, example_reading: str) -> None:
+    """Completa tipo de palabra y pinyin del ejemplo en palabras guardadas antes de que existieran."""
+    _conn.execute(
+        "UPDATE words SET pos = CASE WHEN pos = '' THEN ? ELSE pos END, "
+        "example_reading = CASE WHEN example_reading = '' THEN ? ELSE example_reading END WHERE id = ?",
+        (pos.strip(), example_reading.strip(), word_id),
+    )
+    _conn.commit()
 
 
 def get_word(word_id: int, uid: int) -> dict | None:

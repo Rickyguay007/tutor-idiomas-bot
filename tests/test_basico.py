@@ -101,3 +101,15 @@ def test_canciones(tmp_path):
     assert db.list_songs(1, "zh")[0]["n_words"] == 2
     db.delete_song(sid, 1)
     assert db.list_songs(1, "zh") == [] and db.count_words(1, "zh") == 2
+
+
+def test_tipo_y_pinyin_del_ejemplo(tmp_path):
+    db.init(str(tmp_path / "p.db"))
+    db.get_user(1)
+    db.add_word(1, "zh", HOY, word="自然", reading="zìrán", pos="adjetivo", meaning="natural",
+                example="你会听到自然的中文", example_reading="nǐ huì tīngdào zìrán de zhōngwén")
+    w = db.find_word(1, "zh", "自然")
+    assert w["pos"] == "adjetivo" and w["example_reading"].startswith("nǐ")
+    db.add_word(1, "zh", HOY, word="书")
+    db.fill_word(db.find_word(1, "zh", "书")["id"], "sustantivo", "")
+    assert db.find_word(1, "zh", "书")["pos"] == "sustantivo"

@@ -15,10 +15,10 @@ Responde SIEMPRE con un único objeto JSON válido, sin texto fuera de él, con 
   "grammar": {"pattern": "la estructura en forma de patrón, ej. 虽然…但是… o 把 + objeto + verbo", "explanation": "para qué sirve, en español, 1-2 frases", "example": "oración de ejemplo", "example_reading": "pronunciación del ejemplo", "example_translation": "traducción al español", "level": ""},
   "save_structures": [ {"pattern": "", "explanation": "", "example": "", "example_reading": "", "example_translation": "", "level": ""} ],
   "new_words": [
-    {"word": "", "reading": "", "meaning": "significado en español", "example": "oración corta", "example_translation": "", "level": ""}
+    {"word": "", "reading": "", "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión", "meaning": "significado en español", "example": "oración corta", "example_reading": "pronunciación de example", "example_translation": "", "level": ""}
   ],
   "save_words": [
-    {"word": "", "reading": "", "meaning": "significado en español", "example": "oración corta", "example_translation": "", "level": ""}
+    {"word": "", "reading": "", "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión", "meaning": "significado en español", "example": "oración corta", "example_reading": "pronunciación de example", "example_translation": "", "level": ""}
   ]
 }
 """
@@ -30,6 +30,7 @@ def tutor_system(lang: str, level: str, name: str, mistakes: list[dict]) -> str:
         reading_rule = (
             'En "reading" escribe el pinyin con marcas de tono de todo "reply" cuando esté en chino; '
             'en "new_words", "save_words" y en los "example_reading" de las estructuras usa pinyin con tonos; los niveles van de HSK1 a HSK6. '
+            'En cada palabra llena SIEMPRE "pos" y "example_reading" (pinyin con tonos de la oración de ejemplo). '
             'En cada corrección llena SIEMPRE "original_reading" y "corrected_reading" con el pinyin con tonos.'
         )
         level_rule = (
@@ -81,7 +82,9 @@ Te darán una palabra o expresión (puede venir en {target} o en español). Devu
   "word": "la palabra en {target}",
   "reading": "{reading}",
   "meaning": "significado en español, breve; si tiene varios, los 2 más comunes",
+  "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión",
   "example": "una oración de ejemplo natural en {target}, del nivel del estudiante",
+  "example_reading": "{reading} de la oración de ejemplo",
   "example_translation": "traducción de la oración al español",
   "level": "nivel aproximado ({levels})",
   "note": "un uso o matiz importante en español, o vacío"

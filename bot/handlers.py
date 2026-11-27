@@ -94,12 +94,16 @@ def word_card(w: dict, with_srs: bool = False) -> str:
     lines = [f"<b>{e(w.get('word'))}</b>"]
     if w.get("reading"):
         lines[0] += f"  <i>{e(w['reading'])}</i>"
+    if w.get("pos"):
+        lines[0] += f"\u2003\u2003<code>{e(w['pos'])}</code>"
     if w.get("meaning"):
         lines.append(e(w["meaning"]))
     if w.get("example"):
         lines.append(f"\n📝 {e(w['example'])}")
+        if w.get("example_reading"):
+            lines.append(f"<i>{e(w['example_reading'])}</i>")
         if w.get("example_translation"):
-            lines.append(f"<i>{e(w['example_translation'])}</i>")
+            lines.append(f"🇪🇸 {e(w['example_translation'])}")
     if w.get("note"):
         lines.append(f"\n💡 {e(w['note'])}")
     extra = []
@@ -110,6 +114,27 @@ def word_card(w: dict, with_srs: bool = False) -> str:
     if extra:
         lines.append(f"\n<code>{e(' · '.join(extra))}</code>")
     return "\n".join(lines)
+
+
+async def complete_word(w: dict) -> dict:
+    """Palabras guardadas antes de esta versión no tienen tipo de palabra ni pinyin del ejemplo.
+    La primera vez que se muestran, se le pide a la IA y queda guardado."""
+    if not w or (w.get("pos") and (w.get("example_reading") or not w.get("example"))):
+        return w
+    reading = "pinyin con marcas de tono" if w["language"] == "zh" else "transcripción IPA"
+    system = (
+        "Devuelve SOLO un objeto JSON con dos campos: "
+        '"pos": el tipo de la palabra en español (sustantivo, verbo, adjetivo, adverbio, clasificador, '
+        'preposición, conjunción, partícula, pronombre o expresión), y '
+        f'"example_reading": el {reading} de la oración (vacío si no hay oración).'
+    )
+    try:
+        data = await ai.ask_json(system, f"Palabra: {w['word']} ({w['meaning']})\nOración: {w['example']}", temperature=0)
+        db.fill_word(w["id"], str(data.get("pos") or ""), str(data.get("example_reading") or ""))
+        return db.get_word(w["id"], w["user_id"]) or w
+    except Exception:
+        log.exception("No pude completar la palabra")
+        return w
 
 
 async def send_voice(update: Update, context, text: str, lang: str) -> None:
@@ -330,6 +355,7 @@ async def agregar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = user["language"]
     existing = db.find_word(user["id"], lang, word)
     if existing:
+        existing = await complete_word(existing)
         await update.message.reply_text(
             "Ya la tenías guardada 👇\n\n" + word_card(existing, with_srs=True), parse_mode=ParseMode.HTML
         )
@@ -402,7 +428,7 @@ async def estructuras(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = _user(update)
     word = " ".join(context.args).strip()
-    found = db.find_word(user["id"], user["language"], word) if word else None
+    found = await complete_word(db.find_word(user["id"], user["language"], word)) if word else None
     if not found:
         await update.message.reply_text("No la encontré entre tus palabras. Puedes guardarla con /agregar.")
         return
@@ -421,7 +447,7 @@ async def exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     writer = csv.writer(buf)
     for w in words:
         back = "<br>".join(
-            x for x in (w["reading"], w["meaning"], w["example"], w["example_translation"]) if x
+            x for x in (w["reading"], w["pos"], w["meaning"], w["example"], w["example_reading"], w["example_translation"]) if x
         )
         tags = " ".join(x for x in (f"tutor-{lang}", w["level"], w["source"].replace(" ", "_")) if x)
         writer.writerow([w["word"], back, tags])
@@ -483,8 +509,8 @@ async def ver(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     rows = "\n".join(
         f"<tr><td class='w'>{e(w['word'])}</td><td class='r'>{e(w['reading'])}</td>"
-        f"<td>{e(w['meaning'])}</td>"
-        f"<td class='x'>{e(w['example'])}<br><i>{e(w['example_translation'])}</i></td>"
+        f"<td>{e(w['meaning'])}<br><span class='m'>{e(w['pos'])}</span></td>"
+        f"<td class='x'>{e(w['example'])}<br><span class='r'>{e(w['example_reading'])}</span><br><i>{e(w['example_translation'])}</i></td>"
         f"<td class='m'>{e(w['level'])}<br>{e(w['source'])}<br>{e((w['created_at'] or '')[:10])}</td></tr>"
         for w in words
     )
@@ -667,7 +693,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"Nivel actualizado: {value} ✅")
 
     elif action == "show":
-        word = db.get_word(int(value), uid)
+        word = await complete_word(db.get_word(int(value), uid))
         if not word:
             return
         buttons = [[InlineKeyboardButton(label, callback_data=f"grade:{word['id']}:{g}") for g, label in srs.GRADES.items()]]

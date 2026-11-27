@@ -41,7 +41,7 @@ def pick_word_system(lang: str, level: str) -> str:
     return f"""Eres profesora de {LANG_NAMES[lang]} para hispanohablantes de nivel {level}.
 Elige UNA palabra útil de ese nivel (sustantivo, verbo o adjetivo frecuente) para practicar traducción.
 Devuelve SOLO un objeto JSON:
-{{"word": "la palabra en {LANG_NAMES[lang]}", "reading": "{_reading_rule(lang)}", "meaning": "significado en español, 1 a 3 palabras", "level": "{level}"}}"""
+{{"word": "la palabra en {LANG_NAMES[lang]}", "reading": "{_reading_rule(lang)}", "pos": "tipo de palabra en español", "meaning": "significado en español, 1 a 3 palabras", "level": "{level}"}}"""
 
 
 def eval_word_system(lang: str, level: str) -> str:
@@ -298,7 +298,7 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict,
             grade = 2 if ok else 0
             db.update_srs(saved["id"], *srs.schedule(saved["ease"], saved["interval"], saved["reps"], grade, today))
         elif not ok:
-            db.add_word(user["id"], lang, today, source="práctica", **{k: w.get(k, "") for k in ("word", "reading", "meaning", "level")})
+            db.add_word(user["id"], lang, today, source="práctica", **{k: w.get(k, "") for k in ("word", "reading", "pos", "meaning", "level")})
             parts.append("\n🆕 La guardé en tus palabras para repasarla.")
     elif ex["kind"] == "struct":
         parts.append(f"{'✅' if data.get('ok') else '🟡'} {_e(data.get('feedback'))}")

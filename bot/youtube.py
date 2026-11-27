@@ -102,7 +102,7 @@ Los subtítulos automáticos pueden tener errores: ignora lo que no tenga sentid
 Devuelve SOLO un objeto JSON:
 {{
   "summary": "de qué trata el video, en español, 1 frase",
-  "words": [{{"word": "", "reading": "{reading}", "meaning": "significado en español", "example": "la frase del video donde aparece (corta)", "example_translation": "traducción al español", "level": "{levels}"}}],
+  "words": [{{"word": "", "reading": "{reading}", "pos": "tipo de palabra en español: sustantivo | verbo | adjetivo | adverbio | clasificador | preposición | conjunción | partícula | pronombre | expresión", "meaning": "significado en español", "example": "la frase del video donde aparece (corta)", "example_reading": "{reading} de example", "example_translation": "traducción al español", "level": "{levels}"}}],
   "structures": [{{"pattern": "ej. 虽然…但是…", "explanation": "para qué sirve, en español", "example": "frase del video", "example_reading": "{reading}", "example_translation": "", "level": ""}}]
 }}"""
 
@@ -255,7 +255,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE, user: di
         if it.get("saved"):
             continue
         if it["kind"] == "word":
-            fields = {k: it.get(k, "") for k in ("word", "reading", "meaning", "example", "example_translation", "level")}
+            fields = {k: it.get(k, "") for k in db.WORD_FIELDS}
             db.add_word(user["id"], lang, today, source="YouTube", video_id=pending["vid"], **fields)
         else:
             fields = {k: it.get(k, "") for k in ("pattern", "explanation", "example", "example_reading", "example_translation", "level")}
