@@ -211,7 +211,7 @@ async def analyze_part(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user: d
         lines.append(f"<i>{_e(data['summary'])}</i>\n")
     for it in items:
         if it["kind"] == "word":
-            lines.append(f"• <b>{_e(it['word'])}</b> <i>{_e(it.get('reading'))}</i> – {_e(it.get('meaning'))}")
+            lines.append(f"• <b>{_e(it['word'])}</b> <code>{_e(it.get('reading'))}</code> – {_e(it.get('meaning'))}")
         else:
             lines.append(f"• 📌 <b>{_e(it['pattern'])}</b> – {_e(it.get('explanation'))}")
     lines.append("\nToca las que quieras guardar:")

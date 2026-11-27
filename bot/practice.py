@@ -244,7 +244,7 @@ async def hint(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"💡 Tiene {size} y su pronunciación empieza con «{first}».")
     else:
         words = ex["scene"].get("key_words", [])
-        lines = [f"• {_e(w.get('word'))} <i>{_e(w.get('reading'))}</i> – {_e(w.get('meaning'))}" for w in words]
+        lines = [f"• {_e(w.get('word'))} <code>{_e(w.get('reading'))}</code> – {_e(w.get('meaning'))}" for w in words]
         await update.message.reply_text("💡 Palabras útiles:\n" + "\n".join(lines), parse_mode=ParseMode.HTML)
 
 
@@ -283,13 +283,13 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict,
         ok = bool(data.get("word_ok"))
         icon = "✅" if ok and data.get("sentence_ok") else ("🟡" if ok else "❌")
         parts.append(f"{icon} {_e(data.get('feedback'))}")
-        parts.append(f"\n<b>{_e(w.get('word'))}</b> <i>{_e(w.get('reading'))}</i> – {_e(w.get('meaning'))}")
+        parts.append(f"\n<b>{_e(w.get('word'))}</b> <code>{_e(w.get('reading'))}</code> – {_e(w.get('meaning'))}")
         if data.get("corrected"):
-            parts.append(f"\n✏️ <b>{_e(data['corrected'])}</b>\n<i>{_e(data.get('corrected_reading'))}</i>")
+            parts.append(f"\n✏️ <b>{_e(data['corrected'])}</b>\n<code>{_e(data.get('corrected_reading'))}</code>")
             db.add_mistake(user["id"], lang, text, data["corrected"], data.get("feedback", ""))
         if data.get("example"):
             parts.append(
-                f"\n📝 {_e(data['example'])}\n<i>{_e(data.get('example_reading'))}</i>\n"
+                f"\n📝 {_e(data['example'])}\n<code>{_e(data.get('example_reading'))}</code>\n"
                 f"🇪🇸 {_e(data.get('example_translation'))}"
             )
         # Si era una palabra guardada, la respuesta cuenta como repaso.
@@ -304,11 +304,11 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict,
         parts.append(f"{'✅' if data.get('ok') else '🟡'} {_e(data.get('feedback'))}")
         parts.append(f"\n📌 <b>{_e(st['pattern'])}</b>")
         if data.get("corrected"):
-            parts.append(f"\n✏️ <b>{_e(data['corrected'])}</b>\n<i>{_e(data.get('corrected_reading'))}</i>")
+            parts.append(f"\n✏️ <b>{_e(data['corrected'])}</b>\n<code>{_e(data.get('corrected_reading'))}</code>")
             db.add_mistake(user["id"], lang, text, data["corrected"], data.get("feedback", ""))
         if data.get("example"):
             parts.append(
-                f"\n📝 {_e(data['example'])}\n<i>{_e(data.get('example_reading'))}</i>\n"
+                f"\n📝 {_e(data['example'])}\n<code>{_e(data.get('example_reading'))}</code>\n"
                 f"🇪🇸 {_e(data.get('example_translation'))}"
             )
         db.mark_structure_practiced(st["id"])
@@ -321,16 +321,16 @@ async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict,
                 db.add_mistake(user["id"], lang, c.get("original", ""), c["corrected"], c.get("explanation", ""))
                 line = f"• <s>{_e(c.get('original'))}</s>"
                 if c.get("original_reading"):
-                    line += f" <i>({_e(c['original_reading'])})</i>"
+                    line += f" <code>{_e(c['original_reading'])}</code>"
                 line += f"\n  → <b>{_e(c['corrected'])}</b>"
                 if c.get("corrected_reading"):
-                    line += f" <i>({_e(c['corrected_reading'])})</i>"
+                    line += f" <code>{_e(c['corrected_reading'])}</code>"
                 if c.get("explanation"):
                     line += f"\n  {_e(c['explanation'])}"
                 parts.append(line)
         if data.get("model"):
             parts.append(
-                f"\n🌟 <b>Así lo podrías decir</b>\n{_e(data['model'])}\n<i>{_e(data.get('model_reading'))}</i>\n"
+                f"\n🌟 <b>Así lo podrías decir</b>\n{_e(data['model'])}\n<code>{_e(data.get('model_reading'))}</code>\n"
                 f"🇪🇸 {_e(data.get('model_translation'))}"
             )
 

@@ -90,18 +90,32 @@ def e(text) -> str:
     return html.escape(str(text or ""))
 
 
+POS_ZH = {
+    "sustantivo": "名词", "verbo": "动词", "adjetivo": "形容词", "adverbio": "副词",
+    "clasificador": "量词", "preposición": "介词", "conjunción": "连词", "partícula": "助词",
+    "pronombre": "代词", "expresión": "短语", "número": "数词", "interjección": "叹词",
+}
+
+
+def pos_label(pos: str, lang: str) -> str:
+    """'adjetivo' → '形容词 · adjetivo' en chino; en inglés se deja en español."""
+    pos = (pos or "").strip().lower()
+    zh = POS_ZH.get(pos) if lang == "zh" else None
+    return f"{zh} · {pos}" if zh else pos
+
+
 def word_card(w: dict, with_srs: bool = False) -> str:
     lines = [f"<b>{e(w.get('word'))}</b>"]
     if w.get("reading"):
-        lines[0] += f"  <i>{e(w['reading'])}</i>"
+        lines[0] += f"  <code>{e(w['reading'])}</code>"
     if w.get("pos"):
-        lines[0] += f"\u2003\u2003<code>{e(w['pos'])}</code>"
+        lines[0] += f"\u2003\u2003🏷 {e(pos_label(w['pos'], w.get('language', 'zh')))}"
     if w.get("meaning"):
         lines.append(e(w["meaning"]))
     if w.get("example"):
         lines.append(f"\n📝 {e(w['example'])}")
         if w.get("example_reading"):
-            lines.append(f"<i>{e(w['example_reading'])}</i>")
+            lines.append(f"<code>{e(w['example_reading'])}</code>")
         if w.get("example_translation"):
             lines.append(f"🇪🇸 {e(w['example_translation'])}")
     if w.get("note"):
@@ -112,7 +126,7 @@ def word_card(w: dict, with_srs: bool = False) -> str:
     if with_srs and w.get("due"):
         extra.append(f"próximo repaso {w['due']}")
     if extra:
-        lines.append(f"\n<code>{e(' · '.join(extra))}</code>")
+        lines.append(f"\n<i>{e(' · '.join(extra))}</i>")
     return "\n".join(lines)
 
 
@@ -232,7 +246,7 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
 
     parts = [f"<b>{e(reply)}</b>"]
     if data.get("reading"):
-        parts.append(f"<i>{e(data['reading'])}</i>")
+        parts.append(f"<code>{e(data['reading'])}</code>")
     if data.get("translation"):
         parts.append(f"🇪🇸 {e(data['translation'])}")
 
@@ -243,10 +257,10 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
             db.add_mistake(uid, lang, c.get("original", ""), c["corrected"], c.get("explanation", ""))
             line = f"• <s>{e(c.get('original'))}</s>"
             if c.get("original_reading"):
-                line += f" <i>({e(c['original_reading'])})</i>"
+                line += f" <code>{e(c['original_reading'])}</code>"
             line += f"\n  → <b>{e(c['corrected'])}</b>"
             if c.get("corrected_reading"):
-                line += f" <i>({e(c['corrected_reading'])})</i>"
+                line += f" <code>{e(c['corrected_reading'])}</code>"
             if c.get("explanation"):
                 line += f"\n  {e(c['explanation'])}"
             parts.append(line)
@@ -258,7 +272,7 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
         if g.get("explanation"):
             parts.append(e(g["explanation"]))
         if g.get("example"):
-            parts.append(f"<i>{e(g['example'])}</i>" + (f"  ({e(g['example_reading'])})" if g.get("example_reading") else ""))
+            parts.append(f"<i>{e(g['example'])}</i>" + (f"\n<code>{e(g['example_reading'])}</code>" if g.get("example_reading") else ""))
 
     for st in data["save_structures"]:
         if isinstance(st, dict) and st.get("pattern"):
@@ -277,7 +291,7 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
             already.append(w)
     if requested:
         parts.append("\n✅ <b>Guardé lo que me pediste</b>")
-        parts.extend(f"• {e(w['word'])} <i>{e(w.get('reading'))}</i> – {e(w.get('meaning'))}" for w in requested)
+        parts.extend(f"• {e(w['word'])} <code>{e(w.get('reading'))}</code> – {e(w.get('meaning'))}" for w in requested)
     if already:
         parts.append("\n👍 Ya tenías guardada: " + ", ".join(e(w["word"]) for w in already))
 
@@ -287,7 +301,7 @@ async def _converse(update: Update, context, text: str, from_voice: bool = False
             saved.append(w)
     if saved:
         parts.append("\n🆕 <b>Guardé</b>")
-        parts.extend(f"• {e(w['word'])} <i>{e(w.get('reading'))}</i> – {e(w.get('meaning'))}" for w in saved)
+        parts.extend(f"• {e(w['word'])} <code>{e(w.get('reading'))}</code> – {e(w.get('meaning'))}" for w in saved)
 
     message = "\n".join(parts)
     if len(message) > 4000:
@@ -392,7 +406,7 @@ async def palabras(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     total = db.count_words(user["id"], lang)
     lines = [f"<b>{LANG_LABEL[lang]} · {total} palabras</b>" + (f" (filtro {e(level)})" if level else ""), ""]
-    lines += [f"• <b>{e(w['word'])}</b> <i>{e(w['reading'])}</i> – {e(w['meaning'])}" for w in words]
+    lines += [f"• <b>{e(w['word'])}</b> <code>{e(w['reading'])}</code> – {e(w['meaning'])}" for w in words]
     if total > len(words):
         lines.append(f"\n…y {total - len(words)} más. Usa /ver para verlas todas.")
     await update.message.reply_text("\n".join(lines)[:4000], parse_mode=ParseMode.HTML)

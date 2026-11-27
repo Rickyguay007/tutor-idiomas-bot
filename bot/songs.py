@@ -100,7 +100,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE, user: di
             await context.bot.send_message(chat_id, "Todavía no guardaste palabras de esta canción. Toca «➕ Buscar más palabras».")
             return
         lines = [f"🎵 <b>{_e(song['title'])}</b>", ""]
-        lines += [f"• <b>{_e(w['word'])}</b> <i>{_e(w['reading'])}</i> – {_e(w['meaning'])}" for w in words]
+        lines += [f"• <b>{_e(w['word'])}</b> <code>{_e(w['reading'])}</code> – {_e(w['meaning'])}" for w in words]
         if structs:
             lines.append("")
             lines += [f"• 📌 <b>{_e(s['pattern'])}</b> – {_e(s['explanation'])}" for s in structs]
